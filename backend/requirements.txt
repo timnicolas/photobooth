@@ -1,0 +1,8 @@
+pycups==2.0.4
+flask
+flask-jwt-extended
+peewee
+opencv-python
+numpy
+flask-swagger-ui
+# picamera2 — Raspberry Pi uniquement, installer manuellement : pip install picamera2

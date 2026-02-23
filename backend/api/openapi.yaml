@@ -1,0 +1,530 @@
+openapi: "3.0.3"
+info:
+  title: Photobooth API
+  version: "1.0.0"
+  description: API de contrôle du photobooth (caméra, masques, photos, impression)
+
+servers:
+  - url: http://localhost:5000
+    description: Serveur local
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      example:
+        error: "Message d'erreur"
+
+    LoginRequest:
+      type: object
+      required: [mail, password]
+      properties:
+        mail:
+          type: string
+          format: email
+          example: admin@photobooth.fr
+        password:
+          type: string
+          example: monmotdepasse
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          type: object
+          properties:
+            mail:
+              type: string
+            firstname:
+              type: string
+            lastname:
+              type: string
+            is_admin:
+              type: boolean
+
+    Mask:
+      type: object
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        filename:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    Photo:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mask_id:
+          type: integer
+          nullable: true
+        captured_at:
+          type: string
+          format: date-time
+        printed:
+          type: boolean
+
+    CaptureResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        mask_applied:
+          type: integer
+          nullable: true
+        printed:
+          type: boolean
+        print_error:
+          type: string
+          description: Présent uniquement si l'impression a échoué
+
+    PrinterStatus:
+      type: object
+      properties:
+        printer:
+          type: string
+        available:
+          type: boolean
+        ready:
+          type: boolean
+        message:
+          type: string
+        reasons:
+          type: array
+          items:
+            type: string
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Authentification
+  - name: Caméra
+    description: Flux vidéo et capture photo
+  - name: Masques
+    description: Gestion des overlays PNG
+  - name: Photos
+    description: Galerie des photos capturées
+  - name: Imprimante
+    description: Statut de l'imprimante Canon Selphy
+
+paths:
+  /login:
+    post:
+      tags: [Auth]
+      summary: Connexion et obtention du JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: JWT retourné
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Champs manquants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /camera/stream:
+    get:
+      tags: [Caméra]
+      summary: Flux vidéo MJPEG en temps réel
+      security: []
+      description: |
+        Flux MJPEG (`multipart/x-mixed-replace`). Compatible nativement avec `<img src="...">` en HTML.
+        Accessible sans authentification (réseau local fermé).
+      responses:
+        '200':
+          description: Flux MJPEG continu
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+
+  /camera/capture:
+    post:
+      tags: [Caméra]
+      summary: Capture une photo
+      description: |
+        Capture une frame depuis la caméra, applique le masque actif (si défini),
+        enregistre le fichier JPEG et insère un enregistrement en base.
+        Si `print=true`, envoie la photo à l'imprimante (échec non bloquant).
+      parameters:
+        - name: print
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Envoyer la photo à l'imprimante après capture
+      responses:
+        '201':
+          description: Photo capturée avec succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptureResponse'
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Erreur caméra (lecture impossible)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /masks:
+    get:
+      tags: [Masques]
+      summary: Liste tous les masques disponibles
+      responses:
+        '200':
+          description: Liste des masques
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Mask'
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags: [Masques]
+      summary: Upload un masque PNG (admin uniquement)
+      description: Le fichier doit être un PNG avec canal alpha (transparence).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Fichier PNG avec canal alpha
+                label:
+                  type: string
+                  description: Nom affiché (optionnel, nom du fichier par défaut)
+      responses:
+        '201':
+          description: Masque créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mask'
+        '400':
+          description: Fichier manquant ou format invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Accès réservé aux administrateurs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /masks/{id}:
+    delete:
+      tags: [Masques]
+      summary: Supprime un masque (admin uniquement)
+      description: Supprime le fichier disque et l'enregistrement DB. Les photos liées conservent leur `mask_id` à NULL.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Masque supprimé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '403':
+          description: Accès réservé aux administrateurs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Masque introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /masks/{id}/select:
+    put:
+      tags: [Masques]
+      summary: Définit le masque actif
+      description: Désactive tous les autres masques et active celui-ci. Un seul masque peut être actif à la fois.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Masque activé
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  id:
+                    type: integer
+                  label:
+                    type: string
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Masque introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /masks/{id}/file:
+    get:
+      tags: [Masques]
+      summary: Télécharge le fichier PNG d'un masque
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Fichier PNG
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Masque introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /photos:
+    get:
+      tags: [Photos]
+      summary: Liste toutes les photos capturées
+      description: Triées de la plus récente à la plus ancienne.
+      responses:
+        '200':
+          description: Liste des photos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Photo'
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /photos/{id}:
+    get:
+      tags: [Photos]
+      summary: Détail d'une photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Détails de la photo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Photo'
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Photo introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags: [Photos]
+      summary: Supprime une photo (admin uniquement)
+      description: Supprime le fichier JPEG et l'enregistrement DB.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Photo supprimée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '403':
+          description: Accès réservé aux administrateurs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Photo introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /photos/{id}/file:
+    get:
+      tags: [Photos]
+      summary: Télécharge le fichier JPEG d'une photo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Fichier JPEG
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Photo introuvable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /printer/status:
+    get:
+      tags: [Imprimante]
+      summary: Statut de l'imprimante configurée
+      responses:
+        '200':
+          description: Statut retourné
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterStatus'
+        '401':
+          description: Token manquant ou invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Imprimante non trouvée dans CUPS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  printer:
+                    type: string
+                  available:
+                    type: boolean
+                  error:
+                    type: string
+        '503':
+          description: CUPS inaccessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

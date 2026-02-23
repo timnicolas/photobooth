@@ -211,3 +211,4 @@ __marimo__/
 .vscode/
 photobooth-venv/
 tests-functions/*.jpg
+data
