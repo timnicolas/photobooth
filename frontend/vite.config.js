@@ -9,9 +9,10 @@ export default defineConfig({
   ],
   server: {
     host: true,  // écoute sur 0.0.0.0 → accessible depuis le réseau local
+    port: 2022,
     proxy: {
       '/api': {
-        target: 'http://localhost:2022',
+        target: 'http://localhost:2027',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

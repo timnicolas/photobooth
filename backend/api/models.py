@@ -33,6 +33,7 @@ class User(BaseModel):
 class Mask(BaseModel):
     filename = CharField()  # basename UUID, ex: "a1b2c3.png"
     label = CharField()
+    orientation = CharField(default="both")  # "portrait", "landscape", "both"
     is_active = BooleanField(default=False)
     created_at = DateTimeField(default=datetime.datetime.now)
 
@@ -50,6 +51,27 @@ class Photo(BaseModel):
         table_name = "photos"
 
 
+class AppSettings(BaseModel):
+    """Paramètres globaux de l'application — une seule ligne (singleton)."""
+    allow_no_mask = BooleanField(default=True)
+
+    class Meta:
+        table_name = "app_settings"
+
+    @classmethod
+    def get_instance(cls):
+        """Retourne l'unique ligne de paramètres, en la créant si nécessaire."""
+        instance, _ = cls.get_or_create(id=1, defaults={"allow_no_mask": True})
+        return instance
+
+
 def init_db():
     with db:
-        db.create_tables([User, Mask, Photo], safe=True)
+        db.create_tables([User, Mask, Photo, AppSettings], safe=True)
+        # Migration : ajout de la colonne orientation si absente
+        try:
+            db.execute_sql("ALTER TABLE masks ADD COLUMN orientation VARCHAR(16) DEFAULT 'both'")
+        except Exception:
+            pass  # Colonne déjà présente
+        # Initialise les paramètres par défaut si absents
+        AppSettings.get_instance()

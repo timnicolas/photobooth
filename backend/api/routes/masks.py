@@ -11,10 +11,22 @@ from api.models import Mask, db
 masks_bp = Blueprint("masks", __name__)
 
 _ALLOWED_EXTENSIONS = {"png"}
+_VALID_ORIENTATIONS = {"portrait", "landscape", "both"}
 
 
 def _allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in _ALLOWED_EXTENSIONS
+
+
+def _mask_dict(m: Mask) -> dict:
+    return {
+        "id": m.id,
+        "label": m.label,
+        "filename": m.filename,
+        "orientation": m.orientation,
+        "is_active": m.is_active,
+        "created_at": m.created_at.isoformat(),
+    }
 
 
 @masks_bp.route("/masks", methods=["POST"])
@@ -32,23 +44,19 @@ def upload_mask():
         return jsonify({"error": "Seuls les fichiers PNG sont acceptés"}), 400
 
     label = request.form.get("label", "").strip() or file.filename
+    orientation = request.form.get("orientation", "both")
+    if orientation not in _VALID_ORIENTATIONS:
+        orientation = "both"
+
     unique_filename = f"{uuid.uuid4().hex}.png"
 
     os.makedirs(Config.MASKS_DIR, exist_ok=True)
     filepath = os.path.join(Config.MASKS_DIR, unique_filename)
     file.save(filepath)
 
-    mask = Mask.create(filename=unique_filename, label=label)
+    mask = Mask.create(filename=unique_filename, label=label, orientation=orientation)
 
-    return jsonify(
-        {
-            "id": mask.id,
-            "label": mask.label,
-            "filename": mask.filename,
-            "is_active": mask.is_active,
-            "created_at": mask.created_at.isoformat(),
-        }
-    ), 201
+    return jsonify(_mask_dict(mask)), 201
 
 
 @masks_bp.route("/masks", methods=["GET"])
@@ -56,18 +64,7 @@ def upload_mask():
 def list_masks():
     """Liste tous les masques disponibles."""
     masks = Mask.select().order_by(Mask.created_at.desc())
-    return jsonify(
-        [
-            {
-                "id": m.id,
-                "label": m.label,
-                "filename": m.filename,
-                "is_active": m.is_active,
-                "created_at": m.created_at.isoformat(),
-            }
-            for m in masks
-        ]
-    )
+    return jsonify([_mask_dict(m) for m in masks])
 
 
 @masks_bp.route("/masks/<int:mask_id>", methods=["DELETE"])
@@ -86,6 +83,14 @@ def delete_mask(mask_id):
 
     mask.delete_instance()
     return jsonify({"message": "Masque supprimé"}), 200
+
+
+@masks_bp.route("/masks/deselect", methods=["PUT"])
+@jwt_required()
+def deselect_masks():
+    """Désélectionne tous les masques."""
+    Mask.update(is_active=False).execute()
+    return jsonify({"message": "Masques désélectionnés"}), 200
 
 
 @masks_bp.route("/masks/<int:mask_id>/select", methods=["PUT"])

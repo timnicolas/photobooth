@@ -1,6 +1,10 @@
 import client from './client'
 
-export const streamUrl = '/api/camera/stream'
+export const getStreamUrl = (orientation = 'portrait', maskId = null) => {
+  const params = new URLSearchParams({ orientation })
+  if (maskId != null) params.set('mask_id', maskId)
+  return `/api/camera/stream?${params}`
+}
 
-export const postCapture = (print = false) =>
-  client.post(`/camera/capture?print=${print}`).then((r) => r.data)
+export const postCapture = (print = false, orientation = 'portrait') =>
+  client.post(`/camera/capture?print=${print}&orientation=${orientation}`).then((r) => r.data)

@@ -11,6 +11,7 @@ from api.routes.camera import camera_bp
 from api.routes.masks import masks_bp
 from api.routes.photos import photos_bp
 from api.routes.printer import printer_bp
+from api.routes.settings import settings_bp
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,6 +29,7 @@ def create_app():
     app.register_blueprint(masks_bp)
     app.register_blueprint(photos_bp)
     app.register_blueprint(printer_bp)
+    app.register_blueprint(settings_bp)
 
     # Swagger UI — accessible à /docs
     swaggerui_bp = get_swaggerui_blueprint(
@@ -40,5 +42,9 @@ def create_app():
     @app.route("/openapi.yaml")
     def openapi_spec():
         return send_from_directory(_HERE, "openapi.yaml", mimetype="text/yaml")
+
+    @app.route('/favicon.ico')
+    def favicon():
+        return send_from_directory(_HERE, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
     return app

@@ -17,6 +17,12 @@ source photobooth-venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
+Créez un utilisateur admin et un utilisateur classique
+```bash
+cd backend
+python create_user.py
+```
+
 Installez l'imprimante sur le raspberrypi (ou ordinateur). Par la suite l'API sera capable de lancer une impression.
 
 ## Lancement
@@ -36,11 +42,11 @@ npm run dev
 
 ## Todo
 
-- [ ] Test end-to-end
 - [ ] Test raspberry CAM
-- [ ] Délai de 3s pour prise de photo
-- [ ] Refaire interface (faut que ca prenne max 100% de la hauteur)
-- [ ] Menu photo, ajouter un bouton pour re-imprimer
-- [ ] Test masque
 - [ ] Gestion erreurs d'imprimante ?
-- [ ] Tester connection utilisateur normal ?
+- [ ] Tester en mode hors connection
+
+BUGS
+- [ ] pb d'icon : ca risque de planter en hors ligne
+
+- [ ] créer script raspberrypi pour tout lancer sur 10.4.4.12:2022
