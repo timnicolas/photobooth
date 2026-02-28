@@ -24,25 +24,28 @@ export const useMasksStore = defineStore('masks', () => {
     }
   }
 
-  async function selectMask(id) {
-    await apiSelectMask(id)
+  // Optimiste : mise à jour locale immédiate, sync serveur en arrière-plan
+  function selectMask(id) {
     masks.value = masks.value.map((m) => ({ ...m, is_active: m.id === id }))
+    apiSelectMask(id).catch(() => {})
   }
 
-  async function deselectAll() {
-    await apiDeselectMasks()
+  function deselectAll() {
     masks.value = masks.value.map((m) => ({ ...m, is_active: false }))
+    apiDeselectMasks().catch(() => {})
   }
 
-  async function setOrientation(value) {
+  function setOrientation(value) {
     orientation.value = value
     const active = activeMask.value
     if (active && active.orientation !== 'both' && active.orientation !== value) {
-      await deselectAll()
+      // Désélectionner localement, sync serveur en arrière-plan
+      masks.value = masks.value.map((m) => ({ ...m, is_active: false }))
+      apiDeselectMasks().catch(() => {})
     }
-    // Auto-sélectionner le premier masque compatible pour la nouvelle orientation
+    // Auto-sélectionner le premier masque compatible
     if (!activeMask.value && filteredMasks.value.length > 0) {
-      await selectMask(filteredMasks.value[0].id)
+      selectMask(filteredMasks.value[0].id)
     }
   }
 

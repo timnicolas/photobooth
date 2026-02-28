@@ -109,7 +109,7 @@
                 </div>
               </div>
               <v-card-text class="pa-2">
-                <div class="text-caption text-truncate text-medium-emphasis">
+                <div class="photo-date text-truncate">
                   {{ formatDate(photo.captured_at) }}
                 </div>
                 <v-chip v-if="photo.printed" size="x-small" color="success" class="mt-1">
@@ -264,6 +264,8 @@ async function load(p = page.value) {
     page.value = data.page
     totalPages.value = data.pages
     total.value = data.total
+  } catch {
+    showSnackbar('error', 'Erreur de chargement — réessayer')
   } finally {
     loading.value = false
   }
@@ -409,4 +411,6 @@ function formatDate(iso) {
 <style scoped>
 .photo-card { cursor: pointer; transition: transform 0.15s; }
 .photo-card:hover { transform: scale(1.02); }
+.photo-card:active { transform: scale(0.97); transition-duration: 0.08s; }
+.photo-date { font-size: 12px; color: rgba(255, 255, 255, 0.7); }
 </style>

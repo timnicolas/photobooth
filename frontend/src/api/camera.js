@@ -7,4 +7,4 @@ export const getStreamUrl = (orientation = 'portrait', maskId = null) => {
 }
 
 export const postCapture = (print = false, orientation = 'portrait') =>
-  client.post(`/camera/capture?print=${print}&orientation=${orientation}`).then((r) => r.data)
+  client.post(`/camera/capture?print=${print}&orientation=${orientation}`, null, { timeout: 30000 }).then((r) => r.data)

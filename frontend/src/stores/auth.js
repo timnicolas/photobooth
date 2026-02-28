@@ -16,7 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = data.user
     localStorage.setItem('token', data.token)
     localStorage.setItem('user', JSON.stringify(data.user))
-    router.push('/photobooth')
+    router.push('/')
   }
 
   function logout() {

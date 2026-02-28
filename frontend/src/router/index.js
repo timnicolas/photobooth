@@ -5,9 +5,8 @@ import GalleryView from '../views/GalleryView.vue'
 import AdminView from '../views/AdminView.vue'
 
 const routes = [
-  { path: '/', redirect: '/photobooth' },
+  { path: '/', component: PhotoboothView, meta: { requiresAuth: true } },
   { path: '/login', component: LoginView },
-  { path: '/photobooth', component: PhotoboothView, meta: { requiresAuth: true } },
   { path: '/gallery', component: GalleryView, meta: { requiresAuth: true } },
   { path: '/admin', component: AdminView, meta: { requiresAuth: true, requiresAdmin: true } },
 ]
@@ -22,7 +21,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !token) return '/login'
   if (to.meta.requiresAdmin) {
     const user = JSON.parse(localStorage.getItem('user') || '{}')
-    if (!user.is_admin) return '/photobooth'
+    if (!user.is_admin) return '/'
   }
 })
 
