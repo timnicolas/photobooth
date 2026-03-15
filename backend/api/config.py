@@ -9,7 +9,7 @@ class Config:
     DATA_DIR = os.environ.get("DATA_DIR", "../data")
     DATABASE_PATH = os.environ.get("DATABASE_PATH", os.path.join(DATA_DIR, "photobooth.db"))
     # Type de caméra : "integrated" (USB/OpenCV, défaut) ou "picamera" (Raspberry Pi)
-    CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "integrated")
+    CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "picamera")
     # Index de la caméra (0 = première caméra USB détectée, ignoré pour picamera)
     CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
     # Dossier où les photos capturées sont sauvegardées

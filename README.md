@@ -29,7 +29,7 @@ Chaque étape vérifie si elle a déjà été effectuée — le script peut êtr
 Configurer le Raspberry Pi comme routeur WiFi (IP fixe `10.4.4.12`, partage internet via RJ45) :
 
 ```bash
-bash scripts/03_wifi_ap.sh
+sudo bash scripts/03_wifi_ap.sh
 ```
 
 Ce script :
