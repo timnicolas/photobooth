@@ -60,12 +60,11 @@ fi
 
 BACKEND_SERVICE="/etc/systemd/system/photobooth-backend.service"
 FRONTEND_SERVICE="/etc/systemd/system/photobooth-frontend.service"
+NODE_BIN="$(command -v node)"
+NPM_BIN="$(command -v npm)"
 
-if [ -f "$BACKEND_SERVICE" ]; then
-    skip "service photobooth-backend"
-else
-    log "Création du service photobooth-backend..."
-    sudo tee "$BACKEND_SERVICE" > /dev/null <<EOF
+log "Création du service photobooth-backend..."
+sudo tee "$BACKEND_SERVICE" > /dev/null <<EOF
 [Unit]
 Description=Photobooth Backend (Flask)
 After=network.target
@@ -83,16 +82,10 @@ StandardError=append:$HOME/photobooth-backend.log
 [Install]
 WantedBy=multi-user.target
 EOF
-    ok "Service photobooth-backend créé"
-fi
+ok "Service photobooth-backend créé"
 
-if [ -f "$FRONTEND_SERVICE" ]; then
-    skip "service photobooth-frontend"
-else
-    log "Création du service photobooth-frontend..."
-    NODE_BIN="$(command -v node)"
-    NPM_BIN="$(command -v npm)"
-    sudo tee "$FRONTEND_SERVICE" > /dev/null <<EOF
+log "Création du service photobooth-frontend..."
+sudo tee "$FRONTEND_SERVICE" > /dev/null <<EOF
 [Unit]
 Description=Photobooth Frontend (Vite)
 After=network.target
@@ -112,8 +105,7 @@ StandardError=append:$HOME/photobooth-frontend.log
 [Install]
 WantedBy=multi-user.target
 EOF
-    ok "Service photobooth-frontend créé"
-fi
+ok "Service photobooth-frontend créé"
 
 # --- Activation et démarrage des services ---
 
