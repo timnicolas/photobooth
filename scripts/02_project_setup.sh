@@ -29,6 +29,17 @@ else
     ok "Venv créé"
 fi
 
+# --- Dossiers de données ---
+
+for dir in "$PROJECT_ROOT/data/photos" "$PROJECT_ROOT/data/masks"; do
+    if [ -d "$dir" ]; then
+        skip "$dir"
+    else
+        mkdir -p "$dir"
+        ok "$dir créé"
+    fi
+done
+
 # --- Dépendances Python ---
 
 log "Installation des dépendances Python..."
@@ -66,6 +77,8 @@ WorkingDirectory=$PROJECT_ROOT/backend
 ExecStart=$VENV_DIR/bin/python run.py
 Restart=always
 RestartSec=5
+StandardOutput=append:$HOME/photobooth-backend.log
+StandardError=append:$HOME/photobooth-backend.log
 
 [Install]
 WantedBy=multi-user.target
@@ -93,6 +106,8 @@ Environment=NODE_ENV=development
 Environment=PATH=$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Restart=always
 RestartSec=5
+StandardOutput=append:$HOME/photobooth-frontend.log
+StandardError=append:$HOME/photobooth-frontend.log
 
 [Install]
 WantedBy=multi-user.target

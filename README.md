@@ -24,6 +24,22 @@ Le script installe automatiquement :
 
 Chaque étape vérifie si elle a déjà été effectuée — le script peut être relancé sans risque.
 
+### Point d'accès WiFi
+
+Configurer le Raspberry Pi comme routeur WiFi (IP fixe `10.4.4.12`, partage internet via RJ45) :
+
+```bash
+bash scripts/03_wifi_ap.sh
+```
+
+Ce script :
+- Crée un hotspot WPA2 via NetworkManager (`SSID: PhotoBooth`, `mdp: photobooth`)
+- Attribue l'IP fixe `10.4.4.12` au Raspberry Pi
+- Active le partage de connexion depuis `eth0` si un câble est branché
+- Peut être relancé sans risque pour reconfigurer
+
+> Pour modifier le SSID ou le mot de passe, éditer les variables en tête de `scripts/03_wifi_ap.sh`.
+
 ### Post-installation
 
 Créer un utilisateur admin et un utilisateur classique :

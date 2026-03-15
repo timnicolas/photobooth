@@ -15,7 +15,7 @@ log "=== Configuration du Raspberry Pi ==="
 
 # --- Packages système via apt ---
 
-APT_PACKAGES=(vim git tmux zsh network-manager)
+APT_PACKAGES=(vim git tmux zsh network-manager python3-dev libcups2-dev)
 
 log "Mise à jour des paquets apt..."
 sudo apt-get update -qq
