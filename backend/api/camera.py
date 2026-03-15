@@ -107,37 +107,42 @@ def _integrated_stream(orientation: str = "portrait", mask_path: str = None):
 # ---------------------------------------------------------------------------
 # PiCamera2 — Raspberry Pi
 # picamera2 est importé en lazy pour ne pas bloquer le démarrage sur ordi de dev
+#
+# Singleton: une seule instance Picamera2 est conservée ouverte pour éviter
+# les erreurs "Device or resource busy" entre requêtes successives.
 # ---------------------------------------------------------------------------
+import threading
+
+_picam2 = None
+_picam2_lock = threading.Lock()
+
+
+def _get_picamera():
+    """Retourne l'instance Picamera2 singleton, en la créant si nécessaire."""
+    global _picam2
+    if _picam2 is None:
+        from picamera2 import Picamera2  # noqa: PLC0415
+        _picam2 = Picamera2()
+        _picam2.configure(_picam2.create_preview_configuration(main={"size": (1280, 720)}))
+        _picam2.start()
+    return _picam2
+
 
 def _picamera_capture() -> np.ndarray:
-    from picamera2 import Picamera2  # noqa: PLC0415
-
-    picam2 = Picamera2()
-    try:
-        picam2.configure(picam2.create_still_configuration())
-        picam2.start()
+    with _picam2_lock:
+        picam2 = _get_picamera()
         frame = picam2.capture_array()  # RGB
         return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    finally:
-        picam2.stop()
-        picam2.close()
 
 
 def _picamera_stream(orientation: str = "portrait", mask_path: str = None):
-    from picamera2 import Picamera2  # noqa: PLC0415
-
-    picam2 = Picamera2()
-    picam2.configure(picam2.create_preview_configuration(main={"size": (1280, 720)}))
-    picam2.start()
-    try:
-        while True:
+    while True:
+        with _picam2_lock:
+            picam2 = _get_picamera()
             frame = picam2.capture_array()  # RGB
-            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            frame_bgr = crop_to_orientation(frame_bgr, orientation)
-            if mask_path:
-                frame_bgr = apply_mask(frame_bgr, mask_path)
-            _, buf = cv2.imencode(".jpg", frame_bgr)
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
-    finally:
-        picam2.stop()
-        picam2.close()
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame_bgr = crop_to_orientation(frame_bgr, orientation)
+        if mask_path:
+            frame_bgr = apply_mask(frame_bgr, mask_path)
+        _, buf = cv2.imencode(".jpg", frame_bgr)
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
