@@ -12,12 +12,15 @@ class Config:
     CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "picamera")
     # Index de la caméra (0 = première caméra USB détectée, ignoré pour picamera)
     CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
-    # Résolution du flux live picamera (lores, YUV420)
+    # Résolution et FPS du flux live picamera
     PICAMERA_STREAM_WIDTH = int(os.environ.get("PICAMERA_STREAM_WIDTH", 1280))
     PICAMERA_STREAM_HEIGHT = int(os.environ.get("PICAMERA_STREAM_HEIGHT", 720))
+    PICAMERA_STREAM_FPS = int(os.environ.get("PICAMERA_STREAM_FPS", 10))
     # Résolution de capture photo picamera (main, RGB888) — 2592×1944 fonctionne sur v1/v2/HQ
-    PICAMERA_CAPTURE_WIDTH = int(os.environ.get("PICAMERA_CAPTURE_WIDTH", 4608))
-    PICAMERA_CAPTURE_HEIGHT = int(os.environ.get("PICAMERA_CAPTURE_HEIGHT", 2592))
+    PICAMERA_CAPTURE_WIDTH = int(os.environ.get("PICAMERA_CAPTURE_WIDTH", 1280))
+    PICAMERA_CAPTURE_HEIGHT = int(os.environ.get("PICAMERA_CAPTURE_HEIGHT", 720))
+    #PICAMERA_CAPTURE_WIDTH = int(os.environ.get("PICAMERA_CAPTURE_WIDTH", 4608))
+    #PICAMERA_CAPTURE_HEIGHT = int(os.environ.get("PICAMERA_CAPTURE_HEIGHT", 2592))
     # Dossier où les photos capturées sont sauvegardées
     PHOTOS_DIR = os.environ.get("PHOTOS_DIR", os.path.join(DATA_DIR, "photos"))
     # Dossier où les masques PNG sont stockés

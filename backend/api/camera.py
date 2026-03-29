@@ -4,6 +4,8 @@ Valeurs supportées :
   "integrated"  — caméra USB/intégrée via OpenCV (défaut, dev sur ordi)
   "picamera"    — Raspberry Pi Camera via picamera2
 """
+import time
+
 import cv2
 import numpy as np
 
@@ -108,43 +110,68 @@ def _integrated_stream(orientation: str = "portrait", mask_path: str = None):
 # PiCamera2 — Raspberry Pi
 # picamera2 est importé en lazy pour ne pas bloquer le démarrage sur ordi de dev
 #
-# Singleton: une seule instance Picamera2 est conservée ouverte pour éviter
-# les erreurs "Device or resource busy" entre requêtes successives.
+# Thread de fond qui capture en continu les frames preview et stocke la dernière.
+# Le générateur MJPEG lit cette frame sans jamais bloquer sur la caméra :
+# si capture_array() accroche ponctuellement, le stream continue avec la dernière
+# frame connue au lieu de se bloquer côté HTTP.
 # ---------------------------------------------------------------------------
 import threading
 
 _picam2 = None
 _picam2_lock = threading.Lock()
 
+_bg_frame: np.ndarray | None = None  # dernière frame BGR capturée par le thread preview
+_bg_frame_lock = threading.Lock()
+_bg_thread: threading.Thread | None = None
+
 
 def _get_picamera():
-    """Retourne l'instance Picamera2 singleton, en la créant si nécessaire.
-
-    Preview léger (stream_size, BGR888) en continu.
-    La capture haute résolution bascule temporairement en mode still via
-    switch_mode_and_capture_array, puis revient au preview automatiquement.
-
-    Note format : BGR888 en picamera2 stocke les bytes en ordre B,G,R — directement
-    utilisable par OpenCV sans conversion. RGB888 stocke aussi en BGR (convention V4L2),
-    ce qui entraînerait une double inversion et une teinte bleue si on convertissait.
-    """
+    """Retourne l'instance Picamera2 singleton, en la créant si nécessaire."""
     global _picam2
     if _picam2 is None:
         from picamera2 import Picamera2  # noqa: PLC0415
         _picam2 = Picamera2()
         stream_size = (Config.PICAMERA_STREAM_WIDTH, Config.PICAMERA_STREAM_HEIGHT)
         config = _picam2.create_preview_configuration(
-            main={"size": stream_size, "format": "BGR888"},
+            main={"size": stream_size},  # format par défaut XRGB8888 → retourné en RGB
         )
         _picam2.configure(config)
         _picam2.start()
     return _picam2
 
 
+def _preview_loop():
+    """Thread de fond : capture les frames preview et met à jour _bg_frame."""
+    global _bg_frame
+    while True:
+        # Tentative non-bloquante pour ne pas bloquer pendant une capture photo
+        if not _picam2_lock.acquire(blocking=False):
+            time.sleep(0.05)
+            continue
+        try:
+            picam2 = _get_picamera()
+            frame = picam2.capture_array()
+        except Exception:
+            time.sleep(0.05)
+            continue
+        finally:
+            _picam2_lock.release()
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        with _bg_frame_lock:
+            _bg_frame = frame_bgr
+
+
+def _ensure_preview_thread():
+    global _bg_thread
+    if _bg_thread is None or not _bg_thread.is_alive():
+        _bg_thread = threading.Thread(target=_preview_loop, daemon=True)
+        _bg_thread.start()
+
+
 def _picamera_capture() -> np.ndarray:
     with _picam2_lock:
         picam2 = _get_picamera()
-        # Snapshot AWB/exposition du preview pour éviter la teinte bleue au switch
+        # Snapshot AWB/exposition du preview pour éviter la dérive de couleur au switch
         metadata = picam2.capture_metadata()
         controls = {
             "AeEnable": False,
@@ -157,21 +184,34 @@ def _picamera_capture() -> np.ndarray:
 
         capture_size = (Config.PICAMERA_CAPTURE_WIDTH, Config.PICAMERA_CAPTURE_HEIGHT)
         still_config = picam2.create_still_configuration(
-            main={"size": capture_size, "format": "BGR888"},
+            main={"size": capture_size},
         )
         picam2.set_controls(controls)
-        # Bascule en mode still, capture, revient au preview automatiquement
         frame = picam2.switch_mode_and_capture_array(still_config, "main")
-        return frame  # BGR888 → directement utilisable par OpenCV, pas de conversion
+        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
 
 def _picamera_stream(orientation: str = "portrait", mask_path: str = None):
+    _ensure_preview_thread()
+    min_interval = 1.0 / Config.PICAMERA_STREAM_FPS
+    last = 0.0
+    last_buf = None
     while True:
-        with _picam2_lock:
-            picam2 = _get_picamera()
-            frame = picam2.capture_array("main")  # BGR888 — pas de conversion
-        frame = crop_to_orientation(frame, orientation)
-        if mask_path:
-            frame = apply_mask(frame, mask_path)
-        _, buf = cv2.imencode(".jpg", frame)
-        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        now = time.monotonic()
+        elapsed = now - last
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+        last = time.monotonic()
+
+        with _bg_frame_lock:
+            frame_bgr = _bg_frame
+
+        if frame_bgr is not None:
+            f = crop_to_orientation(frame_bgr, orientation)
+            if mask_path:
+                f = apply_mask(f, mask_path)
+            _, buf = cv2.imencode(".jpg", f)
+            last_buf = buf.tobytes()
+
+        if last_buf is not None:
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_buf + b"\r\n"
