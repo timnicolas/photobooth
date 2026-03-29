@@ -48,10 +48,47 @@ cd ~/photobooth/backend && ../photobooth-venv/bin/python create_user.py
 ```
 
 Installer l'imprimante Canon SELPHY CP1500 via CUPS :
+
 ```bash
 sudo apt-get install -y cups printer-driver-gutenprint
 ```
-Puis accéder à l'interface CUPS sur `http://localhost:631` pour ajouter l'imprimante.
+
+Par défaut, CUPS n'écoute que sur `localhost`. Pour accéder à l'interface depuis le réseau, modifier `/etc/cups/cupsd.conf` :
+
+```diff
+- Listen localhost:631
++ Port 631
+
+  <Location />
++   Allow @LOCAL
+    Order allow,deny
+  </Location>
+
+  <Location /admin>
++   Allow @LOCAL
+    AuthType Default
+```
+
+Puis redémarrer CUPS :
+
+```bash
+sudo systemctl restart cups
+```
+
+Le CP1500 n'est pas encore supporté nativement par Gutenprint. Utiliser le driver CP1300 (compatible) et ajouter l'imprimante en ligne de commande :
+
+```bash
+sudo lpadmin -p Canon_SELPHY_CP1500 \
+  -E \
+  -v "usb://Canon/SELPHY%20CP1500?serial=XXXXXXXXXXXXXXXX" \
+  -m "gutenprint.5.3://canon-cp1300/expert"
+
+sudo lpadmin -d Canon_SELPHY_CP1500
+```
+
+> Pour trouver l'URI USB exacte de l'imprimante : `sudo lpinfo -v`
+
+L'interface CUPS est accessible sur `http://10.4.4.12:631` pour vérifier l'état de l'imprimante.
 
 ### Configuration git (si besoin de contribuer)
 

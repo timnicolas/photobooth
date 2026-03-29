@@ -1,5 +1,6 @@
 """PrinterManager — gestion de l'imprimante Canon Selphy CP1500 via CUPS."""
 import os
+import time
 
 import cups
 
@@ -24,50 +25,147 @@ class PrinterManager:
             printers = self.conn.getPrinters()
 
             if nom_imprimante not in printers:
-                return {"en_erreur": True, "message": "Imprimante introuvable", "bloquee": False}
+                return {
+                    "en_erreur": True, "message": "Imprimante introuvable",
+                    "bloquee": False, "erreurs": ["Imprimante introuvable"],
+                    "job_en_cours": False, "reasons": [],
+                }
 
             attrs = printers[nom_imprimante]
             reasons = attrs.get("printer-state-reasons", ["none"])
             state = attrs.get("printer-state", 3)  # 3=Idle, 4=Processing, 5=Stopped
+            reasons_str = " ".join(reasons).lower()
 
-            status = {
+            erreurs = []
+
+            # Erreurs hardware détectées via printer-state-reasons
+            if "media-empty" in reasons_str or "media-needed" in reasons_str:
+                erreurs.append("Plus de papier")
+            if "marker-supply-empty" in reasons_str or "toner-empty" in reasons_str or "no-toner" in reasons_str:
+                erreurs.append("Plus d'encre")
+            if "offline" in reasons_str or "connecting-to-device" in reasons_str:
+                erreurs.append("Imprimante déconnectée")
+            if "input-tray-missing" in reasons_str or "media-tray-missing" in reasons_str:
+                erreurs.append("Bac papier manquant")
+            if "cover-open" in reasons_str or "door-open" in reasons_str:
+                erreurs.append("Capot ouvert")
+
+            # Inspection des jobs actifs via getJobAttributes()
+            # Note : getJobs() ne retourne que job-uri, il faut appeler getJobAttributes().
+            # Le Selphy ne remonte jamais media-empty dans printer-state-reasons ;
+            # on détecte un blocage si un job est en state 5 (processing) depuis plus de 2 min.
+            job_en_cours = state == 4
+            try:
+                jobs = self.conn.getJobs(which_jobs="not-completed", my_jobs=False)
+                for jid in list(jobs.keys())[:10]:
+                    try:
+                        jattrs = self.conn.getJobAttributes(jid)
+                    except Exception:
+                        continue
+
+                    printer_uri = jattrs.get("job-printer-uri", "")
+                    if nom_imprimante not in printer_uri:
+                        continue
+
+                    job_state = jattrs.get("job-state", 0)
+                    # IPP : 3=pending, 4=pending-held, 5=processing, 6=processing-stopped
+                    if job_state in (3, 4, 5, 6):
+                        job_en_cours = True
+
+                    if job_state == 5:  # processing — vérifier si bloqué
+                        time_start = jattrs.get("time-at-processing") or 0
+                        completed = jattrs.get("date-time-at-completed")
+                        now = jattrs.get("job-printer-up-time") or int(time.time())
+                        if time_start and completed is None and (now - time_start) > 120:
+                            if not any("bloquée" in e for e in erreurs):
+                                erreurs.append("Impression bloquée — vérifiez le papier et l'encre")
+            except Exception:
+                pass
+
+            bloquee = state == 5
+            en_erreur = bool(erreurs)
+
+            if erreurs:
+                message = " — ".join(erreurs)
+            elif bloquee:
+                message = "File en pause"
+            elif job_en_cours:
+                message = "Impression en cours..."
+            elif "none" not in reasons_str and reasons:
+                message = f"Info : {reasons_str}"
+            else:
+                message = "Prête"
+
+            return {
                 "nom": nom_imprimante,
-                "en_erreur": False,
-                "message": "Prête",
-                "bloquee": False,
+                "en_erreur": en_erreur,
+                "message": message,
+                "bloquee": bloquee,
+                "erreurs": erreurs,
+                "job_en_cours": job_en_cours,
                 "reasons": reasons,
             }
 
-            reasons_str = " ".join(reasons).lower()
-
-            if state == 5:
-                status["bloquee"] = True
-                status["message"] = "En pause (File stoppée)."
-
-            if "media-empty" in reasons_str or "media-needed" in reasons_str:
-                status["en_erreur"] = True
-                status["message"] = "ERREUR : Plus de papier."
-            elif "marker-supply-empty" in reasons_str or "no-toner" in reasons_str:
-                status["en_erreur"] = True
-                status["message"] = "ERREUR : Plus d'encre."
-            elif "offline" in reasons_str:
-                status["en_erreur"] = True
-                status["message"] = "ERREUR : Imprimante déconnectée."
-            elif "input-tray-missing" in reasons_str:
-                status["en_erreur"] = True
-                status["message"] = "ERREUR : Bac papier manquant."
-            elif "other-error" in reasons_str:
-                status["en_erreur"] = True
-                status["message"] = "ERREUR : Problème inconnu."
-            elif state == 4:
-                status["message"] = "Impression en cours..."
-            elif "none" not in reasons_str and reasons:
-                status["message"] = f"Info : {reasons_str}"
-
-            return status
-
         except Exception as e:
-            return {"en_erreur": True, "message": f"Erreur système : {e}", "bloquee": False}
+            return {
+                "en_erreur": True, "message": f"Erreur système : {e}",
+                "bloquee": False, "erreurs": [f"Erreur système : {e}"],
+                "job_en_cours": False, "reasons": [],
+            }
+
+    def lister_jobs(self, nom_imprimante):
+        """Retourne les jobs actifs pour l'imprimante."""
+        STATE_LABELS = {3: "En attente", 4: "En attente", 5: "En cours", 6: "Bloqué"}
+        result = []
+        try:
+            jobs = self.conn.getJobs(which_jobs="not-completed", my_jobs=False)
+            for jid in list(jobs.keys()):
+                try:
+                    attrs = self.conn.getJobAttributes(jid)
+                except Exception:
+                    continue
+                if nom_imprimante not in attrs.get("job-printer-uri", ""):
+                    continue
+                job_state = attrs.get("job-state", 0)
+                if job_state not in (3, 4, 5, 6):
+                    continue
+                time_start = attrs.get("time-at-processing") or None
+                now = attrs.get("job-printer-up-time") or int(time.time())
+                completed = attrs.get("date-time-at-completed")
+                elapsed = (now - time_start) if (time_start and completed is None) else None
+                result.append({
+                    "id": jid,
+                    "state": job_state,
+                    "state_label": STATE_LABELS.get(job_state, "Inconnu"),
+                    "progress": attrs.get("job-media-progress", 0),
+                    "created_at": attrs.get("time-at-creation"),
+                    "elapsed_seconds": elapsed,
+                })
+        except Exception:
+            pass
+        return result
+
+    def annuler_job(self, job_id):
+        """Annule un job et purge la file pour forcer l'arrêt de l'imprimante."""
+        try:
+            self.conn.cancelJob(job_id, purge_job=True)
+        except cups.IPPError:
+            pass
+        return True
+
+    def annuler_tous_jobs(self, nom_imprimante):
+        """Annule tous les jobs et réinitialise la file (nécessaire sur Selphy)."""
+        try:
+            self.conn.cancelAllJobs(nom_imprimante, my_jobs=False)
+        except cups.IPPError:
+            pass
+        try:
+            # Disable + enable force le Selphy à vider son buffer
+            self.conn.disablePrinter(nom_imprimante)
+            self.conn.enablePrinter(nom_imprimante)
+        except cups.IPPError:
+            pass
+        return True
 
     def reset_error(self, nom_imprimante, purger_file=False):
         """Tente de débloquer l'imprimante après une erreur."""
@@ -93,6 +191,7 @@ class PrinterManager:
 
     def imprimer_image(self, nom_imprimante, chemin_image, sans_bordure=True, noir_blanc=False):
         """Imprime l'image avec gestion des options Selphy CP1500."""
+        chemin_image = os.path.abspath(chemin_image)
         if not os.path.exists(chemin_image):
             raise FileNotFoundError(f"Fichier introuvable : {chemin_image}")
 

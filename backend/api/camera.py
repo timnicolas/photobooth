@@ -118,12 +118,25 @@ _picam2_lock = threading.Lock()
 
 
 def _get_picamera():
-    """Retourne l'instance Picamera2 singleton, en la créant si nécessaire."""
+    """Retourne l'instance Picamera2 singleton, en la créant si nécessaire.
+
+    Preview léger (stream_size, BGR888) en continu.
+    La capture haute résolution bascule temporairement en mode still via
+    switch_mode_and_capture_array, puis revient au preview automatiquement.
+
+    Note format : BGR888 en picamera2 stocke les bytes en ordre B,G,R — directement
+    utilisable par OpenCV sans conversion. RGB888 stocke aussi en BGR (convention V4L2),
+    ce qui entraînerait une double inversion et une teinte bleue si on convertissait.
+    """
     global _picam2
     if _picam2 is None:
         from picamera2 import Picamera2  # noqa: PLC0415
         _picam2 = Picamera2()
-        _picam2.configure(_picam2.create_preview_configuration(main={"size": (1280, 720)}))
+        stream_size = (Config.PICAMERA_STREAM_WIDTH, Config.PICAMERA_STREAM_HEIGHT)
+        config = _picam2.create_preview_configuration(
+            main={"size": stream_size, "format": "BGR888"},
+        )
+        _picam2.configure(config)
         _picam2.start()
     return _picam2
 
@@ -131,18 +144,34 @@ def _get_picamera():
 def _picamera_capture() -> np.ndarray:
     with _picam2_lock:
         picam2 = _get_picamera()
-        frame = picam2.capture_array()  # RGB
-        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        # Snapshot AWB/exposition du preview pour éviter la teinte bleue au switch
+        metadata = picam2.capture_metadata()
+        controls = {
+            "AeEnable": False,
+            "ExposureTime": metadata["ExposureTime"],
+            "AnalogueGain": metadata["AnalogueGain"],
+        }
+        if "ColourGains" in metadata:
+            controls["AwbEnable"] = False
+            controls["ColourGains"] = metadata["ColourGains"]
+
+        capture_size = (Config.PICAMERA_CAPTURE_WIDTH, Config.PICAMERA_CAPTURE_HEIGHT)
+        still_config = picam2.create_still_configuration(
+            main={"size": capture_size, "format": "BGR888"},
+        )
+        picam2.set_controls(controls)
+        # Bascule en mode still, capture, revient au preview automatiquement
+        frame = picam2.switch_mode_and_capture_array(still_config, "main")
+        return frame  # BGR888 → directement utilisable par OpenCV, pas de conversion
 
 
 def _picamera_stream(orientation: str = "portrait", mask_path: str = None):
     while True:
         with _picam2_lock:
             picam2 = _get_picamera()
-            frame = picam2.capture_array()  # RGB
-        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        frame_bgr = crop_to_orientation(frame_bgr, orientation)
+            frame = picam2.capture_array("main")  # BGR888 — pas de conversion
+        frame = crop_to_orientation(frame, orientation)
         if mask_path:
-            frame_bgr = apply_mask(frame_bgr, mask_path)
-        _, buf = cv2.imencode(".jpg", frame_bgr)
+            frame = apply_mask(frame, mask_path)
+        _, buf = cv2.imencode(".jpg", frame)
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"

@@ -7,6 +7,7 @@
         Photobooth
       </v-app-bar-title>
       <template #append>
+        <PrinterMenu />
         <v-btn icon="mdi-refresh" :loading="refreshing" @click="handleRefresh" title="Actualiser" />
         <v-btn icon="mdi-image-multiple" :to="'/gallery'" title="Galerie" />
         <v-btn v-if="auth.isAdmin" icon="mdi-cog" :to="'/admin'" title="Administration" />
@@ -190,16 +191,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useMasksStore } from '../stores/masks'
 import { useSettingsStore } from '../stores/settings'
+import { usePrinterStore } from '../stores/printer'
 import { getStreamUrl, postCapture } from '../api/camera'
 import { printPhoto, photoFileUrl } from '../api/photos'
+import PrinterMenu from '../components/PrinterMenu.vue'
 
 const auth = useAuthStore()
 const masksStore = useMasksStore()
 const settingsStore = useSettingsStore()
+const printerStore = usePrinterStore()
 
 const capturing = ref(false)
 const printing = ref(false)
@@ -225,7 +229,10 @@ const streamUrl = computed(() =>
 
 onMounted(async () => {
   await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
+  printerStore.startPolling()
 })
+
+onUnmounted(() => printerStore.stopPolling())
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -325,7 +332,15 @@ async function handlePrintFromDialog() {
   try {
     await printPhoto(printDialog.value.photoId)
     printDialog.value.show = false
-    showSnackbar('success', 'mdi-printer', 'Impression lancée')
+    showSnackbar('success', 'mdi-printer-check', 'Demande envoyée')
+    setTimeout(async () => {
+      await printerStore.refresh()
+      if (printerStore.errors.length > 0) {
+        showSnackbar('error', 'mdi-printer-alert', printerStore.errors.join(' — '))
+      } else {
+        showSnackbar('success', 'mdi-printer', 'Impression en cours')
+      }
+    }, 4000)
   } catch (e) {
     showSnackbar('error', 'mdi-alert-circle', e.response?.data?.error ?? 'Erreur impression')
   } finally {

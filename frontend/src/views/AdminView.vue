@@ -184,7 +184,7 @@ import { ref, onMounted } from 'vue'
 import { useMasksStore } from '../stores/masks'
 import { useSettingsStore } from '../stores/settings'
 import { postMask, deleteMask, maskFileUrl } from '../api/masks'
-import { getPrinterStatus } from '../api/photos'
+import { getPrinterStatus } from '../api/printer'
 
 const masksStore = useMasksStore()
 const settingsStore = useSettingsStore()

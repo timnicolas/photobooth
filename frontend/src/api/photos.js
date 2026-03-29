@@ -43,4 +43,3 @@ export const downloadSelection = (ids, raw = false) =>
 export const deleteSelection = (ids) =>
   client.post('/photos/delete-selection', { ids }).then((r) => r.data)
 
-export const getPrinterStatus = () => client.get('/printer/status').then((r) => r.data)

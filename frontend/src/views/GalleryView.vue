@@ -31,6 +31,7 @@
 
         <!-- Mode normal -->
         <template v-else>
+          <PrinterMenu />
           <v-btn
             v-if="photos.length > 0"
             icon="mdi-checkbox-multiple-marked-outline"
@@ -213,14 +214,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { usePrinterStore } from '../stores/printer'
+import PrinterMenu from '../components/PrinterMenu.vue'
 import {
   getPhotos, deletePhoto, printPhoto, downloadPhoto, exportPhotos, photoFileUrl,
   downloadSelection, deleteSelection,
 } from '../api/photos'
 
 const auth = useAuthStore()
+const printerStore = usePrinterStore()
 const photos = ref([])
 const loading = ref(false)
 const dialog = ref(false)
@@ -254,7 +258,12 @@ const dialogPhotoUrl = computed(() =>
   selected.value ? photoFileUrl(selected.value.id, showRaw.value) : '',
 )
 
-onMounted(load)
+onMounted(() => {
+  load()
+  printerStore.startPolling()
+})
+
+onUnmounted(() => printerStore.stopPolling())
 
 async function load(p = page.value) {
   loading.value = true
@@ -365,7 +374,15 @@ async function handlePrint() {
     photos.value = photos.value.map((p) =>
       p.id === selected.value.id ? { ...p, printed: true } : p,
     )
-    showSnackbar('success', 'Impression lancée')
+    showSnackbar('success', 'Demande envoyée')
+    setTimeout(async () => {
+      await printerStore.refresh()
+      if (printerStore.errors.length > 0) {
+        showSnackbar('error', printerStore.errors.join(' — '))
+      } else {
+        showSnackbar('success', 'Impression en cours')
+      }
+    }, 4000)
   } catch (e) {
     showSnackbar('error', e.response?.data?.error ?? 'Erreur impression')
   } finally {
