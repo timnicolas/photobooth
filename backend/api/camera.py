@@ -116,10 +116,11 @@ def _integrated_stream(orientation: str = "portrait", mask_path: str = None):
 # Pas de thread maison, pas de lock : picamera2 gère ses propres threads internes.
 # ---------------------------------------------------------------------------
 import io
-from threading import Condition
+from threading import Condition, Lock
 
 _picam2 = None
 _stream_output = None
+_picam2_init_lock = Lock()
 
 
 class StreamingOutput(io.BufferedIOBase):
@@ -138,7 +139,11 @@ class StreamingOutput(io.BufferedIOBase):
 def _get_picamera():
     """Retourne l'instance Picamera2 singleton, en la créant si nécessaire."""
     global _picam2, _stream_output
-    if _picam2 is None:
+    if _picam2 is not None:
+        return _picam2
+    with _picam2_init_lock:
+        if _picam2 is not None:  # un autre thread a pu initialiser pendant l'attente du lock
+            return _picam2
         from picamera2 import Picamera2  # noqa: PLC0415
         from picamera2.encoders import MJPEGEncoder  # noqa: PLC0415
         from picamera2.outputs import FileOutput  # noqa: PLC0415
