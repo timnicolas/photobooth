@@ -44,6 +44,12 @@
             alt="Flux caméra"
             @error="cameraError = true"
           />
+          <img
+            v-if="maskOverlayUrl"
+            :src="maskOverlayUrl"
+            class="camera-stream mask-overlay"
+            alt=""
+          />
 
           <div v-if="cameraError" class="camera-placeholder d-flex align-center justify-center">
             <div class="text-center text-medium-emphasis">
@@ -223,8 +229,10 @@ const orientation = computed({
   set: (val) => masksStore.setOrientation(val),
 })
 
-const streamUrl = computed(() =>
-  getStreamUrl(masksStore.orientation, masksStore.activeMask?.id ?? null),
+const streamUrl = computed(() => getStreamUrl(masksStore.orientation))
+
+const maskOverlayUrl = computed(() =>
+  masksStore.activeMask ? `/api/masks/${masksStore.activeMask.id}/file` : null,
 )
 
 onMounted(async () => {
@@ -404,6 +412,10 @@ function showSnackbar(color, icon, message) {
   width: auto;
   height: auto;
   display: block;
+}
+
+.mask-overlay {
+  pointer-events: none;
 }
 
 .countdown-overlay {

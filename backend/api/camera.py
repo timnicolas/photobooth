@@ -4,8 +4,6 @@ Valeurs supportées :
   "integrated"  — caméra USB/intégrée via OpenCV (défaut, dev sur ordi)
   "picamera"    — Raspberry Pi Camera via picamera2
 """
-import time
-
 import cv2
 import numpy as np
 
@@ -68,9 +66,10 @@ def capture_frame(orientation: str = "portrait") -> np.ndarray:
 
 
 def mjpeg_frames(orientation: str = "portrait", mask_path: str = None):
-    """Générateur de frames MJPEG croppées selon l'orientation, avec masque optionnel."""
+    """Générateur de frames MJPEG. Pour picamera, flux hardware brut (pas de crop/masque).
+    Pour la caméra intégrée, crop et masque sont appliqués par frame."""
     if Config.CAMERA_TYPE == "picamera":
-        yield from _picamera_stream(orientation, mask_path)
+        yield from _picamera_stream()
     else:
         yield from _integrated_stream(orientation, mask_path)
 
@@ -110,108 +109,66 @@ def _integrated_stream(orientation: str = "portrait", mask_path: str = None):
 # PiCamera2 — Raspberry Pi
 # picamera2 est importé en lazy pour ne pas bloquer le démarrage sur ordi de dev
 #
-# Thread de fond qui capture en continu les frames preview et stocke la dernière.
-# Le générateur MJPEG lit cette frame sans jamais bloquer sur la caméra :
-# si capture_array() accroche ponctuellement, le stream continue avec la dernière
-# frame connue au lieu de se bloquer côté HTTP.
+# Architecture double flux (main + lores) sans changement de mode :
+#   - main (2304×1296 RGB888)  → capture photo via captured_request()
+#   - lores (640×480 YUV420)   → encodeur MJPEG hardware → StreamingOutput
+#
+# Pas de thread maison, pas de lock : picamera2 gère ses propres threads internes.
 # ---------------------------------------------------------------------------
-import threading
+import io
+from threading import Condition
 
 _picam2 = None
-_picam2_lock = threading.Lock()
+_stream_output = None
 
-_bg_frame: np.ndarray | None = None  # dernière frame BGR capturée par le thread preview
-_bg_frame_lock = threading.Lock()
-_bg_thread: threading.Thread | None = None
+
+class StreamingOutput(io.BufferedIOBase):
+    """Buffer partagé entre l'encodeur MJPEG hardware et les clients Flask."""
+
+    def __init__(self):
+        self.frame = None
+        self.condition = Condition()
+
+    def write(self, buf):
+        with self.condition:
+            self.frame = buf
+            self.condition.notify_all()
 
 
 def _get_picamera():
     """Retourne l'instance Picamera2 singleton, en la créant si nécessaire."""
-    global _picam2
+    global _picam2, _stream_output
     if _picam2 is None:
         from picamera2 import Picamera2  # noqa: PLC0415
+        from picamera2.encoders import MJPEGEncoder  # noqa: PLC0415
+        from picamera2.outputs import FileOutput  # noqa: PLC0415
+
         _picam2 = Picamera2()
-        stream_size = (Config.PICAMERA_STREAM_WIDTH, Config.PICAMERA_STREAM_HEIGHT)
-        config = _picam2.create_preview_configuration(
-            main={"size": stream_size},  # format par défaut XRGB8888 → retourné en RGB
+        config = _picam2.create_video_configuration(
+            main={"size": (Config.PICAMERA_MAIN_WIDTH, Config.PICAMERA_MAIN_HEIGHT), "format": "RGB888"},
+            lores={"size": (Config.PICAMERA_LORES_WIDTH, Config.PICAMERA_LORES_HEIGHT), "format": "YUV420"},
+            buffer_count=4,
+            controls={"FrameRate": Config.PICAMERA_STREAM_FPS, "AfMode": 2, "AfSpeed": 1},
         )
         _picam2.configure(config)
         _picam2.start()
+        _stream_output = StreamingOutput()
+        encoder = MJPEGEncoder(bitrate=Config.PICAMERA_STREAM_BITRATE)
+        _picam2.start_encoder(encoder, FileOutput(_stream_output), name="lores")
     return _picam2
 
 
-def _preview_loop():
-    """Thread de fond : capture les frames preview et met à jour _bg_frame."""
-    global _bg_frame
-    while True:
-        # Tentative non-bloquante pour ne pas bloquer pendant une capture photo
-        if not _picam2_lock.acquire(blocking=False):
-            time.sleep(0.05)
-            continue
-        try:
-            picam2 = _get_picamera()
-            frame = picam2.capture_array()
-        except Exception:
-            time.sleep(0.05)
-            continue
-        finally:
-            _picam2_lock.release()
-        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        with _bg_frame_lock:
-            _bg_frame = frame_bgr
-
-
-def _ensure_preview_thread():
-    global _bg_thread
-    if _bg_thread is None or not _bg_thread.is_alive():
-        _bg_thread = threading.Thread(target=_preview_loop, daemon=True)
-        _bg_thread.start()
-
-
 def _picamera_capture() -> np.ndarray:
-    with _picam2_lock:
-        picam2 = _get_picamera()
-        # Snapshot AWB/exposition du preview pour éviter la dérive de couleur au switch
-        metadata = picam2.capture_metadata()
-        controls = {
-            "AeEnable": False,
-            "ExposureTime": metadata["ExposureTime"],
-            "AnalogueGain": metadata["AnalogueGain"],
-        }
-        if "ColourGains" in metadata:
-            controls["AwbEnable"] = False
-            controls["ColourGains"] = metadata["ColourGains"]
-
-        capture_size = (Config.PICAMERA_CAPTURE_WIDTH, Config.PICAMERA_CAPTURE_HEIGHT)
-        still_config = picam2.create_still_configuration(
-            main={"size": capture_size},
-        )
-        picam2.set_controls(controls)
-        frame = picam2.switch_mode_and_capture_array(still_config, "main")
-        return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    picam2 = _get_picamera()
+    with picam2.captured_request() as request:
+        array = request.make_array("main")
+    return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
 
 
-def _picamera_stream(orientation: str = "portrait", mask_path: str = None):
-    _ensure_preview_thread()
-    min_interval = 1.0 / Config.PICAMERA_STREAM_FPS
-    last = 0.0
-    last_buf = None
+def _picamera_stream():
+    _get_picamera()  # s'assure que la caméra et l'encodeur sont démarrés
     while True:
-        now = time.monotonic()
-        elapsed = now - last
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        last = time.monotonic()
-
-        with _bg_frame_lock:
-            frame_bgr = _bg_frame
-
-        if frame_bgr is not None:
-            f = crop_to_orientation(frame_bgr, orientation)
-            if mask_path:
-                f = apply_mask(f, mask_path)
-            _, buf = cv2.imencode(".jpg", f)
-            last_buf = buf.tobytes()
-
-        if last_buf is not None:
-            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + last_buf + b"\r\n"
+        with _stream_output.condition:
+            _stream_output.condition.wait()
+            frame = _stream_output.frame
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"

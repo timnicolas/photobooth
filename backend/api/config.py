@@ -12,15 +12,15 @@ class Config:
     CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "picamera")
     # Index de la caméra (0 = première caméra USB détectée, ignoré pour picamera)
     CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
-    # Résolution et FPS du flux live picamera
-    PICAMERA_STREAM_WIDTH = int(os.environ.get("PICAMERA_STREAM_WIDTH", 1280))
-    PICAMERA_STREAM_HEIGHT = int(os.environ.get("PICAMERA_STREAM_HEIGHT", 720))
-    PICAMERA_STREAM_FPS = int(os.environ.get("PICAMERA_STREAM_FPS", 10))
-    # Résolution de capture photo picamera (main, RGB888) — 2592×1944 fonctionne sur v1/v2/HQ
-    PICAMERA_CAPTURE_WIDTH = int(os.environ.get("PICAMERA_CAPTURE_WIDTH", 1280))
-    PICAMERA_CAPTURE_HEIGHT = int(os.environ.get("PICAMERA_CAPTURE_HEIGHT", 720))
-    #PICAMERA_CAPTURE_WIDTH = int(os.environ.get("PICAMERA_CAPTURE_WIDTH", 4608))
-    #PICAMERA_CAPTURE_HEIGHT = int(os.environ.get("PICAMERA_CAPTURE_HEIGHT", 2592))
+    # Résolution flux main (capture photo) — 2304×1296 = demi-résolution capteur IMX708, ~30fps
+    PICAMERA_MAIN_WIDTH = int(os.environ.get("PICAMERA_MAIN_WIDTH", 2304))
+    PICAMERA_MAIN_HEIGHT = int(os.environ.get("PICAMERA_MAIN_HEIGHT", 1296))
+    # Résolution flux lores (stream MJPEG hardware) — 640×480
+    PICAMERA_LORES_WIDTH = int(os.environ.get("PICAMERA_LORES_WIDTH", 640))
+    PICAMERA_LORES_HEIGHT = int(os.environ.get("PICAMERA_LORES_HEIGHT", 480))
+    # Framerate et bitrate de l'encodeur MJPEG hardware
+    PICAMERA_STREAM_FPS = int(os.environ.get("PICAMERA_STREAM_FPS", 30))
+    PICAMERA_STREAM_BITRATE = int(os.environ.get("PICAMERA_STREAM_BITRATE", 5_000_000))
     # Dossier où les photos capturées sont sauvegardées
     PHOTOS_DIR = os.environ.get("PHOTOS_DIR", os.path.join(DATA_DIR, "photos"))
     # Dossier où les masques PNG sont stockés

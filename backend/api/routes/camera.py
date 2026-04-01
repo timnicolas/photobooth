@@ -10,6 +10,7 @@ from api.config import Config
 from api.models import Mask, Photo
 from api.printer import PrinterManager
 
+
 camera_bp = Blueprint("camera", __name__)
 
 
@@ -24,16 +25,9 @@ def stream():
         mask_id     (int, optionnel)         — id du masque à appliquer dans le flux
     """
     orientation = request.args.get("orientation", "portrait")
-    mask_id = request.args.get("mask_id", type=int)
-
-    mask_path = None
-    if mask_id:
-        mask = Mask.get_or_none(Mask.id == mask_id)
-        if mask:
-            mask_path = os.path.join(Config.MASKS_DIR, mask.filename)
 
     return Response(
-        mjpeg_frames(orientation, mask_path),
+        mjpeg_frames(orientation),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
 

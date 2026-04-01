@@ -141,7 +141,12 @@ npm run dev
 
 ## Todo
 
-- [ ] Test raspberry CAM
-- [ ] Test connection imprimante
-- [ ] Gestion erreurs d'imprimante ?
-- [ ] Tester en mode hors connection
+- [ ] Imprimante :
+    - Test annulation, gestion erreur, etc.
+- [ ] Camera :
+    - Trouver paramètres de focus et parametres optimaux pour prendre une photo
+    - Test long et debug du streaming
+    -> Je veux refaire a 100% la partie streaming.
+    -> on peut perdre des images mais on ne veux pas bloquer puis avoir tout un flux d'un coup (si le back ou le front est trop lent)
+    -> les images streaming peuvent etre en basse qualité (soit picamera basse qualité, soit on la baisse avant d'envoyer)
+    -> il faut trouver les parametres optimaux pour prendre une photo avec la picamera v3 (autofocus, qualité, etc.)
