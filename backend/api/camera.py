@@ -167,7 +167,8 @@ def _picamera_capture() -> np.ndarray:
     picam2 = _get_picamera()
     with picam2.captured_request() as request:
         array = request.make_array("main")
-    return cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
+    # picamera2 RGB888 stocke les bytes en ordre BGR (convention libcamera) → pas de conversion
+    return array
 
 
 def _picamera_stream():
