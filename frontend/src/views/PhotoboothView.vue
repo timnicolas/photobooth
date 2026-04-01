@@ -38,18 +38,33 @@
             >mdi-refresh</v-icon>
           </div>
 
-          <img
-            :src="streamUrl"
-            class="camera-stream"
-            alt="Flux caméra"
-            @error="cameraError = true"
-          />
-          <img
-            v-if="maskOverlayUrl"
-            :src="maskOverlayUrl"
-            class="camera-stream mask-overlay"
-            alt=""
-          />
+          <!-- Zone croppée au ratio photo (portrait ou paysage) -->
+          <div class="camera-crop" :style="{ '--crop-ratio': cropRatio }">
+            <img
+              :src="streamUrl"
+              class="camera-stream"
+              alt="Flux caméra"
+              @error="cameraError = true"
+            />
+            <img
+              v-if="maskOverlayUrl"
+              :src="maskOverlayUrl"
+              class="mask-overlay"
+              alt=""
+            />
+            <div v-if="countdown !== null" class="countdown-overlay d-flex align-center justify-center">
+              <span
+                :key="countdown"
+                class="countdown-number"
+                :class="{
+                  'countdown-green': countdown === 3,
+                  'countdown-orange': countdown === 2,
+                  'countdown-red': countdown === 1,
+                }"
+              >{{ countdown }}</span>
+            </div>
+            <div v-if="flashVisible" class="camera-flash" />
+          </div>
 
           <div v-if="cameraError" class="camera-placeholder d-flex align-center justify-center">
             <div class="text-center text-medium-emphasis">
@@ -57,18 +72,6 @@
               <div class="mt-2">Caméra indisponible</div>
             </div>
           </div>
-          <div v-if="countdown !== null" class="countdown-overlay d-flex align-center justify-center">
-            <span
-              :key="countdown"
-              class="countdown-number"
-              :class="{
-                'countdown-green': countdown === 3,
-                'countdown-orange': countdown === 2,
-                'countdown-red': countdown === 1,
-              }"
-            >{{ countdown }}</span>
-          </div>
-          <div v-if="flashVisible" class="camera-flash" />
         </div>
 
         <!-- Sélection masque + capture -->
@@ -230,6 +233,12 @@ const orientation = computed({
 })
 
 const streamUrl = computed(() => getStreamUrl(masksStore.orientation))
+
+const cropRatio = computed(() => {
+  const w = settingsStore.photoWidthMm
+  const h = settingsStore.photoHeightMm
+  return orientation.value === 'landscape' ? h / w : w / h
+})
 
 const maskOverlayUrl = computed(() =>
   masksStore.activeMask ? `/api/masks/${masksStore.activeMask.id}/file` : null,
@@ -402,18 +411,30 @@ function showSnackbar(color, icon, message) {
   overflow: hidden;
 }
 
-.camera-stream {
+.camera-crop {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  aspect-ratio: var(--crop-ratio);
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.camera-stream {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   display: block;
 }
 
 .mask-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
   pointer-events: none;
 }
 

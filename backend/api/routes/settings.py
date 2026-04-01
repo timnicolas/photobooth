@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
+from api.config import Config
 from api.decorators import admin_required
 from api.models import AppSettings
 
@@ -12,7 +13,11 @@ settings_bp = Blueprint("settings", __name__)
 def get_settings():
     """Retourne les paramètres globaux de l'application."""
     s = AppSettings.get_instance()
-    return jsonify({"allow_no_mask": s.allow_no_mask})
+    return jsonify({
+        "allow_no_mask": s.allow_no_mask,
+        "photo_width_mm": Config.PHOTO_WIDTH_MM,
+        "photo_height_mm": Config.PHOTO_HEIGHT_MM,
+    })
 
 
 @settings_bp.route("/settings", methods=["PUT"])
