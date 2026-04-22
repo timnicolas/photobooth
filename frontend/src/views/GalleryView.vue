@@ -33,7 +33,7 @@
         <template v-else>
           <PrinterMenu />
           <v-btn
-            v-if="photos.length > 0"
+            v-if="auth.isAdmin && photos.length > 0"
             icon="mdi-checkbox-multiple-marked-outline"
             title="Sélectionner"
             @click="selectionMode = true"
@@ -58,6 +58,7 @@
             </v-list>
           </v-menu>
           <v-btn icon="mdi-refresh" :loading="loading" @click="load" title="Actualiser" />
+          <v-btn icon="mdi-logout" @click="logoutDialog = true" title="Déconnexion" />
         </template>
       </template>
     </v-app-bar>
@@ -140,6 +141,7 @@
           <template #append>
             <!-- Toggle avec/sans filtre -->
             <v-btn
+              v-if="auth.isAdmin"
               size="small"
               variant="tonal"
               :color="showRaw ? 'orange' : 'primary'"
@@ -202,7 +204,20 @@
         <v-card-actions class="pa-4 pt-2">
           <v-spacer />
           <v-btn variant="text" @click="confirmDialog.resolve(false)">Annuler</v-btn>
-          <v-btn color="error" variant="tonal" @click="confirmDialog.resolve(true)">Supprimer</v-btn>
+          <v-btn :color="confirmDialog.confirmColor" variant="tonal" @click="confirmDialog.resolve(true)">{{ confirmDialog.confirmText }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Dialog déconnexion -->
+    <v-dialog v-model="logoutDialog" max-width="320">
+      <v-card>
+        <v-card-title class="text-body-1 font-weight-bold pt-5 px-5">Déconnexion</v-card-title>
+        <v-card-text class="px-5 pb-2 text-medium-emphasis">Se déconnecter de la session ?</v-card-text>
+        <v-card-actions class="pa-4 pt-2">
+          <v-spacer />
+          <v-btn variant="text" @click="logoutDialog = false">Annuler</v-btn>
+          <v-btn color="primary" variant="tonal" @click="auth.logout()">Déconnexion</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -245,11 +260,12 @@ const page = ref(1)
 const totalPages = ref(1)
 const total = ref(0)
 
-const confirmDialog = ref({ show: false, title: '', message: '', resolve: null })
+const confirmDialog = ref({ show: false, title: '', message: '', confirmText: 'Confirmer', confirmColor: 'primary', resolve: null })
+const logoutDialog = ref(false)
 
-function confirm(title, message) {
+function confirm(title, message, { confirmText = 'Confirmer', confirmColor = 'primary' } = {}) {
   return new Promise((resolve) => {
-    confirmDialog.value = { show: true, title, message, resolve: (val) => {
+    confirmDialog.value = { show: true, title, message, confirmText, confirmColor, resolve: (val) => {
       confirmDialog.value.show = false
       resolve(val)
     }}
@@ -326,7 +342,7 @@ function openDialog(photo) {
 
 async function handleDeleteSelection() {
   const n = selectedIds.value.size
-  const ok = await confirm('Supprimer la sélection', `Supprimer ${n} photo(s) définitivement ?`)
+  const ok = await confirm('Supprimer la sélection', `Supprimer ${n} photo(s) définitivement ?`, { confirmText: 'Supprimer', confirmColor: 'error' })
   if (!ok) return
   deleting.value = true
   try {
@@ -358,7 +374,7 @@ async function handleDownloadSelection() {
 
 async function handleDelete() {
   if (!selected.value) return
-  const ok = await confirm('Supprimer la photo', 'Supprimer cette photo définitivement ?')
+  const ok = await confirm('Supprimer la photo', 'Supprimer cette photo définitivement ?', { confirmText: 'Supprimer', confirmColor: 'error' })
   if (!ok) return
   deleting.value = true
   try {
@@ -376,6 +392,8 @@ async function handleDelete() {
 
 async function handlePrint() {
   if (!selected.value) return
+  const ok = await confirm('Imprimer la photo', "Lancer l'impression de cette photo ?", { confirmText: 'Imprimer', confirmColor: 'primary' })
+  if (!ok) return
   printing.value = true
   try {
     await printPhoto(selected.value.id, showRaw.value)

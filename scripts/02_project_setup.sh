@@ -56,6 +56,10 @@ else
     ok "Dépendances Node installées"
 fi
 
+log "Build du frontend..."
+npm --prefix "$PROJECT_ROOT/frontend" run build
+ok "Frontend buildé"
+
 # --- Services systemd ---
 
 BACKEND_SERVICE="/etc/systemd/system/photobooth-backend.service"
@@ -94,8 +98,8 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$PROJECT_ROOT/frontend
-ExecStart=$NPM_BIN run dev
-Environment=NODE_ENV=development
+ExecStart=$NPM_BIN run preview
+Environment=NODE_ENV=production
 Environment=PATH=$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Restart=always
 RestartSec=5

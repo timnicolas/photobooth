@@ -11,7 +11,6 @@
         <v-btn icon="mdi-refresh" :loading="refreshing" @click="handleRefresh" title="Actualiser" />
         <v-btn icon="mdi-image-multiple" :to="'/gallery'" title="Galerie" />
         <v-btn v-if="auth.isAdmin" icon="mdi-cog" :to="'/admin'" title="Administration" />
-        <v-btn icon="mdi-logout" @click="logoutDialog = true" title="Déconnexion" />
       </template>
     </v-app-bar>
 
@@ -72,13 +71,44 @@
               <div class="mt-2">Caméra indisponible</div>
             </div>
           </div>
-        </div>
 
-        <!-- Sélection masque + capture -->
-        <v-sheet color="surface" elevation="4" class="pa-3" style="padding-bottom: max(12px, env(safe-area-inset-bottom))">
+          <!-- Panneau de contrôle gauche -->
+          <div class="left-controls">
+            <v-btn
+              icon="mdi-phone-rotate-portrait"
+              size="x-large"
+              rounded="circle"
+              elevation="8"
+              color="red"
+              variant="elevated"
+              @click="toggleOrientation"
+            />
+            <div style="height: 3rem;"></div>
+            <v-btn
+              v-if="settingsStore.allowNoMask"
+              icon="mdi-image-off-outline"
+              size="x-large"
+              rounded="circle"
+              :elevation="masksStore.activeMask === null ? 8 : 0"
+              :color="masksStore.activeMask === null ? 'red' : 'white'"
+              :variant="masksStore.activeMask === null ? 'elevated' : 'text'"
+              @click="masksStore.deselectAll()"
+            />
+            <v-btn
+              v-for="mask in masksStore.filteredMasks"
+              :key="mask.id"
+              icon="mdi-image-outline"
+              size="x-large"
+              rounded="circle"
+              :elevation="masksStore.activeMask?.id === mask.id ? 8 : 0"
+              :color="masksStore.activeMask?.id === mask.id ? 'red' : 'white'"
+              :variant="masksStore.activeMask?.id === mask.id ? 'elevated' : 'text'"
+              @click="masksStore.selectMask(mask.id)"
+            />
+          </div>
 
-          <!-- Ligne 1 : bouton capture -->
-          <div class="d-flex align-center justify-center mb-3">
+          <!-- Bouton capture -->
+          <div class="capture-overlay">
             <v-btn
               color="primary"
               size="x-large"
@@ -89,65 +119,9 @@
               @click="handleCapture"
             />
           </div>
-
-          <!-- Ligne 2 : toggle orientation + sélecteur de masques -->
-          <div class="d-flex align-center ga-3">
-            <!-- Toggle portrait / paysage -->
-            <v-btn-toggle
-              v-model="orientation"
-              mandatory
-              color="primary"
-              class="flex-shrink-0 orientation-toggle"
-            >
-              <v-btn value="portrait">
-                Portrait
-              </v-btn>
-              <v-btn value="landscape">
-                Paysage
-              </v-btn>
-            </v-btn-toggle>
-
-            <!-- Sélecteur de masques (filtré par orientation) -->
-            <div class="mask-scroll d-flex align-center flex-grow-1">
-              <v-chip
-                v-if="settingsStore.allowNoMask"
-                :variant="masksStore.activeMask === null ? 'elevated' : 'outlined'"
-                color="primary"
-                class="mr-2 flex-shrink-0"
-                @click="masksStore.deselectAll()"
-              >
-                <v-icon start>mdi-image-filter-none</v-icon>
-                Sans filtre
-              </v-chip>
-
-              <v-chip
-                v-for="mask in masksStore.filteredMasks"
-                :key="mask.id"
-                :variant="masksStore.activeMask?.id === mask.id ? 'elevated' : 'outlined'"
-                color="primary"
-                class="mr-2 flex-shrink-0"
-                @click="masksStore.selectMask(mask.id)"
-              >
-                {{ mask.label }}
-              </v-chip>
-            </div>
-          </div>
-        </v-sheet>
+        </div>
       </v-container>
     </v-main>
-
-    <!-- Dialog déconnexion -->
-    <v-dialog v-model="logoutDialog" max-width="320">
-      <v-card>
-        <v-card-title class="text-body-1 font-weight-bold pt-5 px-5">Déconnexion</v-card-title>
-        <v-card-text class="px-5 pb-2 text-medium-emphasis">Se déconnecter de la session ?</v-card-text>
-        <v-card-actions class="pa-4 pt-2">
-          <v-spacer />
-          <v-btn variant="text" @click="logoutDialog = false">Annuler</v-btn>
-          <v-btn color="primary" variant="tonal" @click="auth.logout()">Déconnexion</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
 
     <!-- Dialog impression post-capture -->
     <v-dialog v-model="printDialog.show" max-width="500" persistent>
@@ -217,7 +191,6 @@ const printerStore = usePrinterStore()
 const capturing = ref(false)
 const printing = ref(false)
 const refreshing = ref(false)
-const logoutDialog = ref(false)
 const cameraError = ref(false)
 const countdown = ref(null)
 const flashVisible = ref(false)
@@ -397,6 +370,10 @@ function onPullEnd() {
   pullStartY = 0
 }
 
+function toggleOrientation() {
+  orientation.value = orientation.value === 'portrait' ? 'landscape' : 'portrait'
+}
+
 function showSnackbar(color, icon, message) {
   snackbar.value = { show: true, color, icon, message }
 }
@@ -426,6 +403,7 @@ function showSnackbar(color, icon, message) {
   height: 100%;
   object-fit: cover;
   display: block;
+  transform: scaleX(-1);
 }
 
 .mask-overlay {
@@ -494,13 +472,30 @@ function showSnackbar(color, icon, message) {
   inset: 0;
 }
 
-.mask-scroll {
-  overflow-x: auto;
+/* Contrôles gauche et bouton capture */
+.left-controls {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 90%;
+  gap: 8px;
+  overflow-y: auto;
   scrollbar-width: none;
-  min-width: 0;
 }
-.mask-scroll::-webkit-scrollbar {
-  display: none;
+
+.left-controls::-webkit-scrollbar { display: none; }
+
+.capture-overlay {
+  position: absolute;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
 }
 
 /* Pull-to-refresh */
@@ -521,8 +516,4 @@ function showSnackbar(color, icon, message) {
 @keyframes spin { to { transform: rotate(360deg); } }
 .pull-spinning { animation: spin 0.7s linear infinite; }
 
-/* Touch targets */
-.orientation-toggle { min-height: 48px; }
-.orientation-toggle :deep(.v-btn) { min-height: 48px; font-size: 15px; padding: 0 20px; touch-action: manipulation; }
-.mask-scroll :deep(.v-chip) { min-height: 40px; font-size: 15px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 </style>

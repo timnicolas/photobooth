@@ -18,4 +18,15 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: true,
+    port: 2022,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:2027',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
 })
