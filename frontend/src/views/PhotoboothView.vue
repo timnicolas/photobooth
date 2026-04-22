@@ -413,12 +413,11 @@ function showSnackbar(color, icon, message) {
 
 .camera-crop {
   position: absolute;
-  top: 50%;
+  top: 0;
+  bottom: 0;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   aspect-ratio: var(--crop-ratio);
-  max-width: 100%;
-  max-height: 100%;
   overflow: hidden;
 }
 

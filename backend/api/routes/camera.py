@@ -75,6 +75,7 @@ def capture():
     photo = Photo.create(
         filename=filename,
         mask=active_mask,
+        orientation=orientation,
         printed=False,
     )
 

@@ -26,6 +26,7 @@ def _photo_dict(p: Photo) -> dict:
         "id": p.id,
         "filename": p.filename,
         "mask_id": p.mask_id,
+        "orientation": p.orientation,
         "captured_at": p.captured_at.isoformat(),
         "printed": p.printed,
         "raw_available": os.path.exists(raw_path),

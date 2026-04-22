@@ -44,6 +44,7 @@ class Mask(BaseModel):
 class Photo(BaseModel):
     filename = CharField()
     mask = ForeignKeyField(Mask, null=True, backref="photos", on_delete="SET NULL")
+    orientation = CharField(default="portrait")  # "portrait" ou "landscape"
     captured_at = DateTimeField(default=datetime.datetime.now)
     printed = BooleanField(default=False)
 
@@ -71,6 +72,11 @@ def init_db():
         # Migration : ajout de la colonne orientation si absente
         try:
             db.execute_sql("ALTER TABLE masks ADD COLUMN orientation VARCHAR(16) DEFAULT 'both'")
+        except Exception:
+            pass  # Colonne déjà présente
+        # Migration : ajout de la colonne orientation sur photos si absente
+        try:
+            db.execute_sql("ALTER TABLE photos ADD COLUMN orientation VARCHAR(16) DEFAULT 'portrait'")
         except Exception:
             pass  # Colonne déjà présente
         # Initialise les paramètres par défaut si absents

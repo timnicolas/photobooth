@@ -95,7 +95,7 @@
               @click="onCardClick(photo)"
             >
               <div class="card-img-wrapper">
-                <v-img :src="photoFileUrl(photo.id)" aspect-ratio="1" cover>
+                <v-img :src="photoFileUrl(photo.id)" :aspect-ratio="photoAspectRatio(photo)" cover>
                   <template #placeholder>
                     <v-skeleton-loader type="image" />
                   </template>
@@ -217,6 +217,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { usePrinterStore } from '../stores/printer'
+import { useSettingsStore } from '../stores/settings'
 import PrinterMenu from '../components/PrinterMenu.vue'
 import {
   getPhotos, deletePhoto, printPhoto, downloadPhoto, exportPhotos, photoFileUrl,
@@ -225,6 +226,7 @@ import {
 
 const auth = useAuthStore()
 const printerStore = usePrinterStore()
+const settingsStore = useSettingsStore()
 const photos = ref([])
 const loading = ref(false)
 const dialog = ref(false)
@@ -258,7 +260,14 @@ const dialogPhotoUrl = computed(() =>
   selected.value ? photoFileUrl(selected.value.id, showRaw.value) : '',
 )
 
+function photoAspectRatio(photo) {
+  const w = settingsStore.photoWidthMm
+  const h = settingsStore.photoHeightMm
+  return photo.orientation === 'landscape' ? h / w : w / h
+}
+
 onMounted(() => {
+  settingsStore.fetchSettings()
   load()
   printerStore.startPolling()
 })

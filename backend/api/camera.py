@@ -10,6 +10,20 @@ import numpy as np
 from api.config import Config
 
 
+def _photo_output_size(orientation: str) -> tuple[int, int]:
+    """Retourne (width, height) en pixels de la sortie finale pour l'orientation donnée.
+
+    Les dimensions sont des multiples exacts des dimensions papier en mm, garantissant
+    un ratio pixel-perfect sans erreur d'arrondi.
+    Ex. (portrait, factor=12) → 89×12 × 119×12 = 1068×1428px (ratio exact 89:119, ~304 DPI)
+    """
+    k = Config.PHOTO_RESOLUTION_FACTOR
+    w_mm, h_mm = Config.PHOTO_WIDTH_MM, Config.PHOTO_HEIGHT_MM
+    if orientation == "landscape":
+        return (h_mm * k, w_mm * k)
+    return (w_mm * k, h_mm * k)
+
+
 def crop_to_orientation(frame: np.ndarray, orientation: str) -> np.ndarray:
     """Centre-crop la frame pour correspondre au ratio du format photo configuré.
 
@@ -57,12 +71,14 @@ def apply_mask(frame_bgr: np.ndarray, mask_path: str) -> np.ndarray:
 
 
 def capture_frame(orientation: str = "portrait") -> np.ndarray:
-    """Capture une frame, crop selon l'orientation, retourne un array numpy BGR."""
+    """Capture une frame, crop selon l'orientation, resize à la résolution de sortie exacte."""
     if Config.CAMERA_TYPE == "picamera":
         frame = _picamera_capture()
     else:
         frame = _integrated_capture()
-    return crop_to_orientation(frame, orientation)
+    cropped = crop_to_orientation(frame, orientation)
+    out_w, out_h = _photo_output_size(orientation)
+    return cv2.resize(cropped, (out_w, out_h), interpolation=cv2.INTER_LANCZOS4)
 
 
 def mjpeg_frames(orientation: str = "portrait", mask_path: str = None):
