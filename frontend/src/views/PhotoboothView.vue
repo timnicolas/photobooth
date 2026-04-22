@@ -39,9 +39,16 @@
 
           <!-- Zone croppée au ratio photo (portrait ou paysage) -->
           <div class="camera-crop" :style="{ '--crop-ratio': cropRatio }">
+            <canvas
+              v-if="!useImgFallback"
+              ref="canvasRef"
+              class="camera-stream"
+            />
             <img
+              v-else
               :src="streamUrl"
               class="camera-stream"
+              style="object-fit: cover;"
               alt="Flux caméra"
               @error="cameraError = true"
             />
@@ -174,7 +181,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useMasksStore } from '../stores/masks'
 import { useSettingsStore } from '../stores/settings'
@@ -200,6 +207,16 @@ const pullDistance = ref(0)
 const PULL_THRESHOLD = 80
 let pullStartY = 0
 
+const canvasRef = ref(null)
+const useImgFallback = ref(false)
+let streamAbortController = null
+let currentBitmap = null
+let resizeObserver = null
+
+function streamApiSupported() {
+  return typeof createImageBitmap === 'function' && typeof ReadableStream !== 'undefined'
+}
+
 const orientation = computed({
   get: () => masksStore.orientation,
   set: (val) => masksStore.setOrientation(val),
@@ -217,12 +234,137 @@ const maskOverlayUrl = computed(() =>
   masksStore.activeMask ? `/api/masks/${masksStore.activeMask.id}/file` : null,
 )
 
+function drawFrame(bitmap) {
+  const canvas = canvasRef.value
+  if (!canvas || !bitmap) return
+  const ctx = canvas.getContext('2d')
+  const cw = canvas.width
+  const ch = canvas.height
+  if (!cw || !ch) return
+  const scale = Math.max(cw / bitmap.width, ch / bitmap.height)
+  const sw = bitmap.width * scale
+  const sh = bitmap.height * scale
+  ctx.drawImage(bitmap, (cw - sw) / 2, (ch - sh) / 2, sw, sh)
+}
+
+function stopStream() {
+  streamAbortController?.abort()
+  streamAbortController = null
+  currentBitmap?.close()
+  currentBitmap = null
+}
+
+async function startStream() {
+  stopStream()
+  cameraError.value = false
+
+  if (!streamApiSupported()) {
+    useImgFallback.value = true
+    return
+  }
+
+  const controller = new AbortController()
+  streamAbortController = controller
+  let buf = new Uint8Array(0)
+  let rendering = false
+
+  const processFrame = (jpeg) => {
+    if (rendering) return
+    rendering = true
+    let promise
+    try {
+      promise = createImageBitmap(new Blob([jpeg], { type: 'image/jpeg' }))
+    } catch {
+      rendering = false
+      return
+    }
+    promise
+      .then(bitmap => {
+        if (controller.signal.aborted) { bitmap.close(); return }
+        drawFrame(bitmap)
+        currentBitmap?.close()
+        currentBitmap = bitmap
+      })
+      .catch(() => {})
+      .finally(() => { rendering = false })
+  }
+
+  try {
+    const res = await fetch(streamUrl.value, { signal: controller.signal })
+    if (!res.body) {
+      useImgFallback.value = true
+      return
+    }
+    const reader = res.body.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        // Le serveur a fermé le flux (redémarrage, etc.) — reconnexion automatique
+        if (!controller.signal.aborted) {
+          await new Promise(r => setTimeout(r, 2000))
+          if (!controller.signal.aborted) startStream()
+        }
+        break
+      }
+      const next = new Uint8Array(buf.length + value.length)
+      next.set(buf)
+      next.set(value, buf.length)
+      buf = next
+      if (buf.length > 500_000) buf = buf.slice(-200_000)
+      let offset = 0
+      while (offset < buf.length - 1) {
+        let s = -1
+        for (let i = offset; i < buf.length - 1; i++) {
+          if (buf[i] === 0xFF && buf[i + 1] === 0xD8) { s = i; break }
+        }
+        if (s < 0) break
+        let e = -1
+        for (let i = s + 2; i < buf.length - 1; i++) {
+          if (buf[i] === 0xFF && buf[i + 1] === 0xD9) { e = i + 2; break }
+        }
+        if (e < 0) break
+        processFrame(buf.slice(s, e))
+        offset = e
+      }
+      buf = buf.slice(offset)
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    // fetch streaming non supporté sur ce navigateur (ex. Safari/multipart) — bascule sur <img>
+    if (!useImgFallback.value) {
+      useImgFallback.value = true
+    } else {
+      cameraError.value = true
+    }
+  }
+}
+
+watch(streamUrl, () => {
+  if (!useImgFallback.value) startStream()
+})
+
 onMounted(async () => {
   await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
   printerStore.startPolling()
+  startStream()
+  resizeObserver = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      const { inlineSize: w, blockSize: h } = entry.contentBoxSize[0]
+      const canvas = canvasRef.value
+      if (!canvas || !w || !h) return
+      canvas.width = Math.round(w)
+      canvas.height = Math.round(h)
+      if (currentBitmap) drawFrame(currentBitmap)
+    }
+  })
+  if (canvasRef.value) resizeObserver.observe(canvasRef.value)
 })
 
-onUnmounted(() => printerStore.stopPolling())
+onUnmounted(() => {
+  printerStore.stopPolling()
+  stopStream()
+  resizeObserver?.disconnect()
+})
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -344,6 +486,7 @@ async function handleRefresh() {
   cameraError.value = false
   try {
     await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
+    startStream()
   } finally {
     refreshing.value = false
     pullDistance.value = 0
@@ -401,7 +544,6 @@ function showSnackbar(color, icon, message) {
 .camera-stream {
   width: 100%;
   height: 100%;
-  object-fit: cover;
   display: block;
   transform: scaleX(-1);
 }
