@@ -142,4 +142,7 @@ npm run dev
 ## Todo
 
 - [ ] Imprimante :
-    - Test annulation, gestion erreur, etc.
+  - refaire a 100% tous le script de gestion d'imprimante
+  - Test annulation, gestion erreur, etc.
+
+- [ ] Quand l'interface est en mode "camera indisponible", auto pull toutes les 5s pour essayer de load l'image (sans avoir besoin de relancer l'app)
