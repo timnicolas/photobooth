@@ -545,7 +545,6 @@ function showSnackbar(color, icon, message) {
   width: 100%;
   height: 100%;
   display: block;
-  transform: scaleX(-1);
 }
 
 .mask-overlay {

@@ -12,6 +12,8 @@ class Config:
     CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "picamera")
     # Index de la caméra (0 = première caméra USB détectée, ignoré pour picamera)
     CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
+    # Miroir horizontal : True = flip gauche/droite (mode selfie), False = image naturelle
+    CAMERA_MIRROR = os.environ.get("CAMERA_MIRROR", "true").lower() in ("1", "true", "yes")
     # Format papier en millimètres (89×119 = carte postale Canon SELPHY)
     # Défini en premier car utilisé pour calculer les dimensions caméra ci-dessous
     PHOTO_WIDTH_MM = int(os.environ.get("PHOTO_WIDTH_MM", 89))

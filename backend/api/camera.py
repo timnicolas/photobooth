@@ -123,6 +123,8 @@ def _integrated_capture() -> np.ndarray:
         success, frame = cap.read()
         if not success:
             raise RuntimeError("Impossible de lire la caméra intégrée")
+        if Config.CAMERA_MIRROR:
+            frame = cv2.flip(frame, 1)
         return frame
     finally:
         cap.release()
@@ -135,6 +137,8 @@ def _integrated_stream(orientation: str = "portrait", mask_path: str = None):
             success, frame = cap.read()
             if not success:
                 break
+            if Config.CAMERA_MIRROR:
+                frame = cv2.flip(frame, 1)
             frame = crop_to_orientation(frame, orientation)
             if mask_path:
                 frame = apply_mask(frame, mask_path)
@@ -183,6 +187,7 @@ def _get_picamera():
     with _picam2_init_lock:
         if _picam2 is not None:  # un autre thread a pu initialiser pendant l'attente du lock
             return _picam2
+        from libcamera import Transform  # noqa: PLC0415
         from picamera2 import Picamera2  # noqa: PLC0415
         from picamera2.encoders import MJPEGEncoder  # noqa: PLC0415
         from picamera2.outputs import FileOutput  # noqa: PLC0415
@@ -212,6 +217,7 @@ def _get_picamera():
             lores={"size": (Config.PICAMERA_LORES_WIDTH, Config.PICAMERA_LORES_HEIGHT), "format": "YUV420"},
             buffer_count=4,
             controls=controls,
+            transform=Transform(hflip=Config.CAMERA_MIRROR),
         )
         _picam2.configure(config)
         _picam2.start()
