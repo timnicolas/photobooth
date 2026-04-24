@@ -37,6 +37,8 @@ class Config:
     # Dossier où les masques PNG sont stockés
     MASKS_DIR = os.environ.get("MASKS_DIR", os.path.join(DATA_DIR, "masks"))
     # Nom exact de l'imprimante dans CUPS
-    PRINTER_NAME = os.environ.get("PRINTER_NAME", "Canon_SELPHY_CP1500")
+    # Canon_SELPHY_CP1500_WiFi = connexion IPP WiFi (recommandée, remonte les erreurs hardware)
+    # Canon_SELPHY_CP1500      = connexion USB via Gutenprint (fallback)
+    PRINTER_NAME = os.environ.get("PRINTER_NAME", "Canon_SELPHY_CP1500_WiFi")
     # Nombre de photos par page dans la galerie
     PHOTO_PAGE_SIZE = int(os.environ.get("PHOTO_PAGE_SIZE", 30))

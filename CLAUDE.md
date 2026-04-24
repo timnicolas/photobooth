@@ -39,7 +39,7 @@ npm run preview   # preview built version
 Backend is configured via environment variables (see `backend/api/config.py`):
 - `CAMERA_TYPE`: `"picamera"` (RPi camera) or `"integrated"` (USB/OpenCV)
 - `CAMERA_INDEX`: USB camera index (default: 0)
-- `PRINTER_NAME`: CUPS printer name
+- `PRINTER_NAME`: CUPS printer name (défaut: `Canon_SELPHY_CP1500_WiFi` — connexion IPP WiFi ; fallback USB: `Canon_SELPHY_CP1500`)
 - `PHOTOS_DIR` / `MASKS_DIR`: storage paths (default: `data/photos/`, `data/masks/`)
 - `API_PORT`: default 2027
 
@@ -55,7 +55,7 @@ WiFi hotspot: SSID `PhotoBooth`, password `photobooth`, IP `10.4.4.12`.
 - **`config.py`** — Centralised config via env vars
 - **`models.py`** — Peewee ORM over SQLite (`data/photobooth.db`): `User`, `Photo`, `Mask`, `AppSettings`
 - **`camera.py`** — Camera abstraction with singleton for picamera2 (prevents "device busy" errors); handles orientation-aware cropping and alpha-composite mask overlay (Porter-Duff)
-- **`printer.py`** — pycups wrapper for Canon SELPHY; handles print options, status reporting, and error states
+- **`printer.py`** — pycups wrapper for Canon SELPHY; handles print options, status reporting, and error states. Printer is connected via WiFi (IPP Everywhere, `ipp://10.4.4.32:631/ipp/print`) for reliable hardware error reporting; USB (`Canon_SELPHY_CP1500`) kept as fallback. IP `10.4.4.32` is fixed via DHCP reservation (`/etc/NetworkManager/dnsmasq-shared.d/selphy-reservation.conf`, MAC `6c:f2:d8:63:3f:73`).
 - **`decorators.py`** — `@jwt_required` and `@admin_required` route guards
 
 Routes in `backend/api/routes/`: `auth`, `camera`, `photos`, `masks`, `printer`, `settings`.

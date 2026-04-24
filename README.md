@@ -75,18 +75,52 @@ Puis redémarrer CUPS :
 sudo systemctl restart cups
 ```
 
-Le CP1500 n'est pas encore supporté nativement par Gutenprint. Utiliser le driver CP1300 (compatible) et ajouter l'imprimante en ligne de commande :
+#### Connexion WiFi (recommandée)
+
+Connecter la Selphy au réseau **PhotoBooth** via son menu (Paramètres réseau → Point d'accès → `PhotoBooth` / `photobooth`). L'imprimante affiche son IP dans Menu → Infos réseau.
+
+Pour trouver l'IP sans écran : broadcast ping puis table ARP :
 
 ```bash
-sudo lpadmin -p Canon_SELPHY_CP1500 \
+ping -b -c 3 10.4.4.255; ip neigh show dev wlan0
+```
+
+Ajouter l'imprimante dans CUPS en IPP (IPP Everywhere, pas de driver propriétaire requis) :
+
+```bash
+sudo /usr/sbin/lpadmin -p Canon_SELPHY_CP1500_WiFi \
+  -E \
+  -v "ipp://10.4.4.XX:631/ipp/print" \
+  -m everywhere \
+  -D "Canon SELPHY CP1500 WiFi"
+
+sudo /usr/sbin/lpadmin -d Canon_SELPHY_CP1500_WiFi
+```
+
+> L'avantage du WiFi sur l'USB : la Selphy expose son serveur IPP natif, ce qui permet à CUPS de lire les erreurs hardware réelles (papier, encre, capot) au lieu de les ignorer.
+
+Pour fixer l'IP de la Selphy (éviter qu'elle change au redémarrage), créer une réservation DHCP via le dnsmasq de NetworkManager :
+
+```bash
+# MAC de la Selphy : vérifier avec `ip neigh show dev wlan0`
+echo "dhcp-host=6c:f2:d8:63:3f:73,10.4.4.32" | sudo tee /etc/NetworkManager/dnsmasq-shared.d/selphy-reservation.conf
+
+# Redémarrer le hotspot pour appliquer
+sudo nmcli connection down PhotoBooth-AP && sudo nmcli connection up PhotoBooth-AP
+```
+
+#### Connexion USB (fallback)
+
+Le CP1500 n'est pas encore supporté nativement par Gutenprint. Utiliser le driver CP1300 (compatible) :
+
+```bash
+sudo /usr/sbin/lpadmin -p Canon_SELPHY_CP1500 \
   -E \
   -v "usb://Canon/SELPHY%20CP1500?serial=XXXXXXXXXXXXXXXX" \
   -m "gutenprint.5.3://canon-cp1300/expert"
-
-sudo lpadmin -d Canon_SELPHY_CP1500
 ```
 
-> Pour trouver l'URI USB exacte de l'imprimante : `sudo lpinfo -v`
+> Pour trouver l'URI USB exacte : `sudo lpinfo -v`
 
 L'interface CUPS est accessible sur `http://10.4.4.12:631` pour vérifier l'état de l'imprimante.
 
