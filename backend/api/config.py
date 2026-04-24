@@ -40,5 +40,8 @@ class Config:
     # Canon_SELPHY_CP1500_WiFi = connexion IPP WiFi (recommandée, remonte les erreurs hardware)
     # Canon_SELPHY_CP1500      = connexion USB via Gutenprint (fallback)
     PRINTER_NAME = os.environ.get("PRINTER_NAME", "Canon_SELPHY_CP1500_WiFi")
+    # IP WiFi de la Selphy pour requêtes IPP directes (bypass cache CUPS)
+    # Laisser vide pour désactiver et utiliser uniquement CUPS
+    PRINTER_WIFI_IP = os.environ.get("PRINTER_WIFI_IP", "10.4.4.32")
     # Nombre de photos par page dans la galerie
     PHOTO_PAGE_SIZE = int(os.environ.get("PHOTO_PAGE_SIZE", 30))

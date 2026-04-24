@@ -63,7 +63,7 @@ def printer_status():
             }
         ), 404
 
-    status = pm.obtenir_statut(Config.PRINTER_NAME)
+    status = pm.obtenir_statut(Config.PRINTER_NAME, wifi_ip=Config.PRINTER_WIFI_IP or None)
     return jsonify(
         {
             "printer": Config.PRINTER_NAME,

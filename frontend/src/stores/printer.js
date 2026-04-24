@@ -5,7 +5,8 @@ import { getPrinterStatus, getPrinterJobs, cancelPrinterJob, cancelAllPrinterJob
 export const usePrinterStore = defineStore('printer', () => {
   const status = ref(null)
   const jobs = ref([])
-  let _intervalId = null
+  let _timeoutId = null
+  let _polling = false
 
   const isError = computed(() => (status.value?.errors ?? []).length > 0)
   const isPrinting = computed(() => status.value?.printing ?? false)
@@ -20,16 +21,26 @@ export const usePrinterStore = defineStore('printer', () => {
     } catch {}
   }
 
-  function startPolling(interval = 20000) {
+  async function _poll() {
+    await refresh()
+    if (_polling) {
+      // 3s en impression, 10s sinon
+      const delay = isPrinting.value ? 1000 : 10000
+      _timeoutId = setTimeout(_poll, delay)
+    }
+  }
+
+  function startPolling() {
     stopPolling()
-    refresh()
-    _intervalId = setInterval(refresh, interval)
+    _polling = true
+    _poll()
   }
 
   function stopPolling() {
-    if (_intervalId) {
-      clearInterval(_intervalId)
-      _intervalId = null
+    _polling = false
+    if (_timeoutId) {
+      clearTimeout(_timeoutId)
+      _timeoutId = null
     }
   }
 

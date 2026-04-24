@@ -23,7 +23,10 @@
           variant="tonal"
           class="ma-2 mb-1"
         >
-          Impression en cours...
+          <div class="d-flex align-center gap-2">
+            <span>Impression en cours...</span>
+            <v-progress-circular indeterminate size="16" width="2" color="info" />
+          </div>
         </v-alert>
         <v-alert
           v-for="err in printerStore.errors"

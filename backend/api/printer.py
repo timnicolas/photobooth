@@ -1,6 +1,9 @@
 """PrinterManager — gestion de l'imprimante Canon Selphy CP1500 via CUPS."""
 import os
+import struct
 import time
+import urllib.error
+import urllib.request
 
 import cups
 
@@ -12,6 +15,111 @@ class PrinterManager:
         except Exception as e:
             raise RuntimeError(f"Impossible de se connecter à CUPS : {e}")
 
+    # ── IPP direct ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_get_printer_attrs(printer_uri: str) -> bytes:
+        """Construit une requête IPP/1.1 Get-Printer-Attributes minimale."""
+        def _a(tag: int, name: str, value: str) -> bytes:
+            nb, vb = name.encode(), value.encode()
+            return bytes([tag]) + struct.pack('>H', len(nb)) + nb + struct.pack('>H', len(vb)) + vb
+
+        return (
+            b'\x01\x01'           # IPP/1.1
+            b'\x00\x0b'           # Get-Printer-Attributes
+            b'\x00\x00\x00\x01'   # request-id = 1
+            b'\x01'               # begin-operation-attributes
+            + _a(0x47, 'attributes-charset', 'utf-8')
+            + _a(0x48, 'attributes-natural-language', 'en-us')
+            + _a(0x45, 'printer-uri', printer_uri)
+            + b'\x03'             # end-of-attributes
+        )
+
+    @staticmethod
+    def _parse_ipp_attrs(data: bytes) -> dict:
+        """Parse une réponse IPP binaire en dict. Attributs multi-valeurs → liste."""
+        if len(data) < 8:
+            return {}
+
+        pos = 8  # saute version(2) + status(2) + request-id(4)
+        result: dict = {}
+        last_name: str | None = None
+
+        while pos < len(data):
+            tag = data[pos]
+            pos += 1
+
+            if tag == 0x03:  # end-of-attributes
+                break
+            if tag < 0x10:  # délimiteur de groupe (0x01–0x0F)
+                last_name = None
+                continue
+
+            if pos + 2 > len(data):
+                break
+            name_len = struct.unpack('>H', data[pos:pos + 2])[0]
+            pos += 2
+
+            if pos + name_len > len(data):
+                break
+            name = data[pos:pos + name_len].decode('utf-8', errors='replace')
+            pos += name_len
+
+            if pos + 2 > len(data):
+                break
+            val_len = struct.unpack('>H', data[pos:pos + 2])[0]
+            pos += 2
+
+            if pos + val_len > len(data):
+                break
+            val_bytes = data[pos:pos + val_len]
+            pos += val_len
+
+            attr_name = name if name else last_name
+            if not attr_name:
+                continue
+            if name:
+                last_name = name
+
+            # Out-of-band (0x10–0x1F) : nom présent mais pas de valeur utile
+            if tag < 0x20:
+                continue
+
+            # Décodage par type
+            if tag in (0x21, 0x23):  # integer / enum
+                if val_len != 4:
+                    continue
+                value = struct.unpack('>i', val_bytes)[0]
+            elif tag == 0x22:  # boolean
+                value = bool(val_bytes[0]) if val_bytes else False
+            elif tag in (0x34, 0x37, 0x4A):  # collection (non géré)
+                continue
+            else:  # toutes les variantes string
+                value = val_bytes.decode('utf-8', errors='replace')
+
+            if attr_name in result:
+                existing = result[attr_name]
+                if not isinstance(existing, list):
+                    result[attr_name] = [existing]
+                result[attr_name].append(value)
+            else:
+                result[attr_name] = value
+
+        return result
+
+    def _ipp_direct_attrs(self, ip: str, port: int = 631) -> dict:
+        """Interroge directement le serveur IPP de l'imprimante, sans passer par CUPS."""
+        printer_uri = f'ipp://{ip}/ipp/print'
+        body = self._build_get_printer_attrs(printer_uri)
+        req = urllib.request.Request(
+            f'http://{ip}:{port}/ipp/print',
+            data=body,
+            headers={'Content-Type': 'application/ipp'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return self._parse_ipp_attrs(resp.read())
+
     def lister_imprimantes(self):
         """Retourne une liste des noms d'imprimantes disponibles."""
         try:
@@ -19,21 +127,42 @@ class PrinterManager:
         except Exception:
             return []
 
-    def obtenir_statut(self, nom_imprimante):
-        """Retourne un dictionnaire avec l'état précis de l'imprimante."""
+    def obtenir_statut(self, nom_imprimante, wifi_ip=None):
+        """Retourne un dictionnaire avec l'état précis de l'imprimante.
+
+        Si wifi_ip est fourni, l'état de l'imprimante est lu directement via IPP
+        (temps réel, sans cache CUPS). Les jobs restent gérés via CUPS.
+        """
         try:
-            printers = self.conn.getPrinters()
+            # ── État imprimante ───────────────────────────────────────────────
+            state, reasons, message_raw = 3, ["none"], ""
 
-            if nom_imprimante not in printers:
-                return {
-                    "en_erreur": True, "message": "Imprimante introuvable",
-                    "bloquee": False, "erreurs": ["Imprimante introuvable"],
-                    "job_en_cours": False, "reasons": [],
-                }
+            if wifi_ip:
+                try:
+                    ipp = self._ipp_direct_attrs(wifi_ip)
+                    state = ipp.get("printer-state", 3)
+                    reasons = ipp.get("printer-state-reasons", ["none"])
+                    if isinstance(reasons, str):
+                        reasons = [reasons]
+                    message_raw = ipp.get("printer-state-message", "") or ""
+                except Exception:
+                    wifi_ip = None  # fallback CUPS
 
-            attrs = printers[nom_imprimante]
-            reasons = attrs.get("printer-state-reasons", ["none"])
-            state = attrs.get("printer-state", 3)  # 3=Idle, 4=Processing, 5=Stopped
+            if not wifi_ip:
+                printers = self.conn.getPrinters()
+                if nom_imprimante not in printers:
+                    return {
+                        "en_erreur": True, "message": "Imprimante introuvable",
+                        "bloquee": False, "erreurs": ["Imprimante introuvable"],
+                        "job_en_cours": False, "reasons": [],
+                    }
+                attrs = printers[nom_imprimante]
+                reasons = attrs.get("printer-state-reasons", ["none"])
+                if isinstance(reasons, str):
+                    reasons = [reasons]
+                state = attrs.get("printer-state", 3)
+                message_raw = attrs.get("printer-state-message", "") or ""
+
             reasons_str = " ".join(reasons).lower()
 
             erreurs = []
