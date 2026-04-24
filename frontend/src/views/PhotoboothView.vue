@@ -46,11 +46,11 @@
             />
             <img
               v-else
-              :src="imgStreamUrl"
+              :src="streamUrl"
               class="camera-stream"
               style="object-fit: cover;"
               alt="Flux caméra"
-              @error="onImgStreamError"
+              @error="cameraError = true"
             />
             <img
               v-if="maskOverlayUrl"
@@ -209,11 +209,9 @@ let pullStartY = 0
 
 const canvasRef = ref(null)
 const useImgFallback = ref(false)
-const streamRetryKey = ref(0)
 let streamAbortController = null
 let currentBitmap = null
 let resizeObserver = null
-let imgRetryTimer = null
 
 function streamApiSupported() {
   return typeof createImageBitmap === 'function' && typeof ReadableStream !== 'undefined'
@@ -225,11 +223,6 @@ const orientation = computed({
 })
 
 const streamUrl = computed(() => getStreamUrl(masksStore.orientation))
-
-const imgStreamUrl = computed(() => {
-  const base = getStreamUrl(masksStore.orientation)
-  return streamRetryKey.value > 0 ? `${base}&_retry=${streamRetryKey.value}` : base
-})
 
 const cropRatio = computed(() => {
   const w = settingsStore.photoWidthMm
@@ -259,15 +252,6 @@ function stopStream() {
   streamAbortController = null
   currentBitmap?.close()
   currentBitmap = null
-  clearTimeout(imgRetryTimer)
-  imgRetryTimer = null
-}
-
-function onImgStreamError() {
-  clearTimeout(imgRetryTimer)
-  imgRetryTimer = setTimeout(() => {
-    streamRetryKey.value++
-  }, 5000)
 }
 
 async function startStream() {
@@ -315,6 +299,7 @@ async function startStream() {
     while (true) {
       const { done, value } = await reader.read()
       if (done) {
+        // Le serveur a fermé le flux (redémarrage, etc.) — reconnexion automatique
         if (!controller.signal.aborted) {
           await new Promise(r => setTimeout(r, 2000))
           if (!controller.signal.aborted) startStream()
@@ -345,8 +330,7 @@ async function startStream() {
     }
   } catch (err) {
     if (err?.name === 'AbortError') return
-    // Première erreur : le navigateur ne supporte pas le streaming canvas → bascule sur <img>
-    // Erreur suivante (déjà en fallback) : le backend est down, on laisse onImgStreamError gérer le retry
+    // fetch streaming non supporté sur ce navigateur (ex. Safari/multipart) — bascule sur <img>
     if (!useImgFallback.value) {
       useImgFallback.value = true
     } else {
@@ -356,9 +340,6 @@ async function startStream() {
 }
 
 watch(streamUrl, () => {
-  streamRetryKey.value = 0
-  clearTimeout(imgRetryTimer)
-  imgRetryTimer = null
   if (!useImgFallback.value) startStream()
 })
 

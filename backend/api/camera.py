@@ -4,10 +4,31 @@ Valeurs supportées :
   "integrated"  — caméra USB/intégrée via OpenCV (défaut, dev sur ordi)
   "picamera"    — Raspberry Pi Camera via picamera2
 """
+import time
+
 import cv2
 import numpy as np
 
 from api.config import Config
+
+
+def _max_resolution_factor(orientation: str) -> int:
+    """Calcule le facteur maximum sans upscaling pour l'orientation donnée.
+
+    Simule le crop sur la résolution main du capteur, puis cherche le plus grand k tel que
+    (w_mm×k, h_mm×k) ≤ dimensions du crop.
+    """
+    main_w, main_h = Config.PICAMERA_MAIN_WIDTH, Config.PICAMERA_MAIN_HEIGHT
+    w_mm, h_mm = Config.PHOTO_WIDTH_MM, Config.PHOTO_HEIGHT_MM
+    if orientation == "landscape":
+        w_mm, h_mm = h_mm, w_mm
+    target_ratio = w_mm / h_mm
+    frame_ratio = main_w / main_h
+    if frame_ratio > target_ratio:
+        crop_w, crop_h = int(main_h * target_ratio), main_h
+    else:
+        crop_w, crop_h = main_w, int(main_w / target_ratio)
+    return min(crop_w // w_mm, crop_h // h_mm)
 
 
 def _photo_output_size(orientation: str) -> tuple[int, int]:
@@ -15,9 +36,11 @@ def _photo_output_size(orientation: str) -> tuple[int, int]:
 
     Les dimensions sont des multiples exacts des dimensions papier en mm, garantissant
     un ratio pixel-perfect sans erreur d'arrondi.
-    Ex. (portrait, factor=12) → 89×12 × 119×12 = 1068×1428px (ratio exact 89:119, ~304 DPI)
+    Si PHOTO_RESOLUTION_FACTOR == "max", utilise la résolution native du capteur sans upscaling.
     """
     k = Config.PHOTO_RESOLUTION_FACTOR
+    if k == "max":
+        k = _max_resolution_factor(orientation)
     w_mm, h_mm = Config.PHOTO_WIDTH_MM, Config.PHOTO_HEIGHT_MM
     if orientation == "landscape":
         return (h_mm * k, w_mm * k)
@@ -165,11 +188,30 @@ def _get_picamera():
         from picamera2.outputs import FileOutput  # noqa: PLC0415
 
         _picam2 = Picamera2()
+        controls = {
+            "FrameRate": Config.PICAMERA_STREAM_FPS,
+            "AfMode": 2,
+            "AfSpeed": 1,
+            "AwbEnable": Config.PICAMERA_COLOUR_GAINS is None,
+            "AeEnable": Config.PICAMERA_EXPOSURE_TIME is None,
+            "NoiseReductionMode": Config.PICAMERA_NOISE_REDUCTION,
+            "Sharpness": Config.PICAMERA_SHARPNESS,
+            "Contrast": Config.PICAMERA_CONTRAST,
+            "Saturation": Config.PICAMERA_SATURATION,
+
+            "HdrMode": 0,
+        }
+        if Config.PICAMERA_EXPOSURE_TIME is not None:
+            controls["ExposureTime"] = Config.PICAMERA_EXPOSURE_TIME
+        if Config.PICAMERA_ANALOGUE_GAIN is not None:
+            controls["AnalogueGain"] = Config.PICAMERA_ANALOGUE_GAIN
+        if Config.PICAMERA_COLOUR_GAINS is not None:
+            controls["ColourGains"] = Config.PICAMERA_COLOUR_GAINS
         config = _picam2.create_video_configuration(
             main={"size": (Config.PICAMERA_MAIN_WIDTH, Config.PICAMERA_MAIN_HEIGHT), "format": "RGB888"},
             lores={"size": (Config.PICAMERA_LORES_WIDTH, Config.PICAMERA_LORES_HEIGHT), "format": "YUV420"},
             buffer_count=4,
-            controls={"FrameRate": Config.PICAMERA_STREAM_FPS, "AfMode": 2, "AfSpeed": 1},
+            controls=controls,
         )
         _picam2.configure(config)
         _picam2.start()
@@ -181,6 +223,7 @@ def _get_picamera():
 
 def _picamera_capture() -> np.ndarray:
     picam2 = _get_picamera()
+    time.sleep(Config.PICAMERA_CAPTURE_DELAY)
     with picam2.captured_request() as request:
         array = request.make_array("main")
     # picamera2 RGB888 stocke les bytes en ordre BGR (convention libcamera) → pas de conversion

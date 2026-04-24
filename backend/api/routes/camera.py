@@ -59,17 +59,18 @@ def capture():
 
     # 3. Application du masque actif (si existant)
     active_mask = Mask.get_or_none(Mask.is_active == True)  # noqa: E712
+    jpeg_params = [cv2.IMWRITE_JPEG_QUALITY, Config.PHOTO_JPEG_QUALITY]
     if active_mask:
         mask_path = os.path.join(Config.MASKS_DIR, active_mask.filename)
         # Version brute (sans masque)
-        cv2.imwrite(raw_filepath, frame)
+        cv2.imwrite(raw_filepath, frame, jpeg_params)
         # Version finale avec masque
         composited = apply_mask(frame, mask_path)
-        cv2.imwrite(filepath, composited)
+        cv2.imwrite(filepath, composited, jpeg_params)
     else:
         # Sans masque : raw et filtered sont identiques
-        cv2.imwrite(filepath, frame)
-        cv2.imwrite(raw_filepath, frame)
+        cv2.imwrite(filepath, frame, jpeg_params)
+        cv2.imwrite(raw_filepath, frame, jpeg_params)
 
     # 4. Enregistrement en base
     photo = Photo.create(

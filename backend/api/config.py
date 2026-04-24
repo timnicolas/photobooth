@@ -17,12 +17,16 @@ class Config:
     PHOTO_WIDTH_MM = int(os.environ.get("PHOTO_WIDTH_MM", 89))
     PHOTO_HEIGHT_MM = int(os.environ.get("PHOTO_HEIGHT_MM", 119))
     # Facteur de résolution de sortie des photos : dimension en px = mm × facteur
+    # "max" = calcule automatiquement le facteur maximum sans upscaling selon l'orientation et la résolution capteur
     # facteur=12 → 89×119mm = 1068×1428px (ratio exact 89:119, ≈ 304 DPI pour une carte postale)
-    PHOTO_RESOLUTION_FACTOR = int(os.environ.get("PHOTO_RESOLUTION_FACTOR", 12))
-    # Résolution flux main (capture photo) — 2304 = demi-résolution capteur IMX708, ~30fps
-    # La hauteur suit le ratio natif 16:9 du capteur IMX708 (contrainte hardware)
-    PICAMERA_MAIN_WIDTH = int(os.environ.get("PICAMERA_MAIN_WIDTH", 2304))
-    PICAMERA_MAIN_HEIGHT = round(PICAMERA_MAIN_WIDTH * 9 / 16)  # 2304 → 1296
+    _factor = os.environ.get("PHOTO_RESOLUTION_FACTOR", "max")
+    PHOTO_RESOLUTION_FACTOR: "int | str" = _factor if _factor == "max" else int(_factor)
+    # Résolution flux main (capture photo) — plein capteur IMX708 (4608×2592)
+    # La hauteur suit le ratio natif 16:9 du capteur IMX708 si non surchargée.
+    # Pour le module HQ (IMX477) : PICAMERA_MAIN_WIDTH=4056 PICAMERA_MAIN_HEIGHT=3040
+    PICAMERA_MAIN_WIDTH = int(os.environ.get("PICAMERA_MAIN_WIDTH", 4608))
+    _main_h = os.environ.get("PICAMERA_MAIN_HEIGHT")
+    PICAMERA_MAIN_HEIGHT = int(_main_h) if _main_h else round(PICAMERA_MAIN_WIDTH * 9 / 16)
     # Résolution flux lores (stream MJPEG hardware preview)
     # Le lores DOIT avoir le même ratio 16:9 que le main (contrainte ISP picamera2) ;
     # utiliser un ratio différent provoque une distorsion dans les frames encodées.
@@ -32,6 +36,22 @@ class Config:
     # Framerate et bitrate de l'encodeur MJPEG hardware
     PICAMERA_STREAM_FPS = int(os.environ.get("PICAMERA_STREAM_FPS", 30))
     PICAMERA_STREAM_BITRATE = int(os.environ.get("PICAMERA_STREAM_BITRATE", 5_000_000))
+    # Qualité image — contrôles ISP picamera2
+    PICAMERA_CAPTURE_DELAY = float(os.environ.get("PICAMERA_CAPTURE_DELAY", 0.5))
+    PICAMERA_NOISE_REDUCTION = int(os.environ.get("PICAMERA_NOISE_REDUCTION", 2))
+    PICAMERA_SHARPNESS = float(os.environ.get("PICAMERA_SHARPNESS", 1.5))
+    PICAMERA_CONTRAST = float(os.environ.get("PICAMERA_CONTRAST", 1.15))
+    PICAMERA_SATURATION = float(os.environ.get("PICAMERA_SATURATION", 1.05))
+    # Exposition fixe (µs) — None = auto AE
+    _exp = os.environ.get("PICAMERA_EXPOSURE_TIME")
+    PICAMERA_EXPOSURE_TIME = int(_exp) if _exp else None
+    _gain = os.environ.get("PICAMERA_ANALOGUE_GAIN")
+    PICAMERA_ANALOGUE_GAIN = float(_gain) if _gain else None
+    # Balance des blancs fixe — None = auto AWB ; format "R,B" ex. "1.5,1.5"
+    _awb = os.environ.get("PICAMERA_COLOUR_GAINS")
+    PICAMERA_COLOUR_GAINS = tuple(float(x) for x in _awb.split(",")) if _awb else None
+    # Qualité JPEG des photos sauvegardées (0-100)
+    PHOTO_JPEG_QUALITY = int(os.environ.get("PHOTO_JPEG_QUALITY", 95))
     # Dossier où les photos capturées sont sauvegardées
     PHOTOS_DIR = os.environ.get("PHOTOS_DIR", os.path.join(DATA_DIR, "photos"))
     # Dossier où les masques PNG sont stockés
