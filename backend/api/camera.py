@@ -50,8 +50,8 @@ def _photo_output_size(orientation: str) -> tuple[int, int]:
 def crop_to_orientation(frame: np.ndarray, orientation: str) -> np.ndarray:
     """Centre-crop la frame pour correspondre au ratio du format photo configuré.
 
-    En portrait  : ratio = PHOTO_WIDTH_MM  / PHOTO_HEIGHT_MM  (ex. 89/119 ≈ 0.748)
-    En paysage   : ratio = PHOTO_HEIGHT_MM / PHOTO_WIDTH_MM   (ex. 119/89 ≈ 1.337)
+    En portrait  : ratio = PHOTO_WIDTH_MM  / PHOTO_HEIGHT_MM  (ex. 100/148 ≈ 0.676)
+    En paysage   : ratio = PHOTO_HEIGHT_MM / PHOTO_WIDTH_MM   (ex. 148/100 = 1.480)
     """
     w_mm = Config.PHOTO_WIDTH_MM
     h_mm = Config.PHOTO_HEIGHT_MM

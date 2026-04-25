@@ -14,13 +14,13 @@ class Config:
     CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", 0))
     # Miroir horizontal : True = flip gauche/droite (mode selfie), False = image naturelle
     CAMERA_MIRROR = os.environ.get("CAMERA_MIRROR", "true").lower() in ("1", "true", "yes")
-    # Format papier en millimètres (89×119 = carte postale Canon SELPHY)
+    # Format papier en millimètres (100×148 = carte postale Canon SELPHY CP1500, pleine surface)
     # Défini en premier car utilisé pour calculer les dimensions caméra ci-dessous
-    PHOTO_WIDTH_MM = int(os.environ.get("PHOTO_WIDTH_MM", 89))
-    PHOTO_HEIGHT_MM = int(os.environ.get("PHOTO_HEIGHT_MM", 119))
+    PHOTO_WIDTH_MM = int(os.environ.get("PHOTO_WIDTH_MM", 100))
+    PHOTO_HEIGHT_MM = int(os.environ.get("PHOTO_HEIGHT_MM", 148))
     # Facteur de résolution de sortie des photos : dimension en px = mm × facteur
     # "max" = calcule automatiquement le facteur maximum sans upscaling selon l'orientation et la résolution capteur
-    # facteur=12 → 89×119mm = 1068×1428px (ratio exact 89:119, ≈ 304 DPI pour une carte postale)
+    # facteur=12 → 100×148mm = 1200×1776px (ratio exact 100:148, ≈ 304 DPI pour une carte postale)
     _factor = os.environ.get("PHOTO_RESOLUTION_FACTOR", "max")
     PHOTO_RESOLUTION_FACTOR: "int | str" = _factor if _factor == "max" else int(_factor)
     # Résolution flux main (capture photo) — plein capteur IMX708 (4608×2592)

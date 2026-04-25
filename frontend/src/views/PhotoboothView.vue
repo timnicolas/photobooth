@@ -267,8 +267,22 @@ async function startStream() {
   streamAbortController = controller
   let buf = new Uint8Array(0)
   let rendering = false
+  let firstFrameReceived = false
+
+  // Si aucune frame n'arrive dans les 5s (ex. WKWebView/Safari PWA qui bloque multipart fetch),
+  // bascule sur <img> plutôt que de rester avec un canvas noir.
+  const noFrameTimer = setTimeout(() => {
+    if (!firstFrameReceived && !controller.signal.aborted) {
+      controller.abort()
+      useImgFallback.value = true
+    }
+  }, 5000)
 
   const processFrame = (jpeg) => {
+    if (!firstFrameReceived) {
+      firstFrameReceived = true
+      clearTimeout(noFrameTimer)
+    }
     if (rendering) return
     rendering = true
     let promise
@@ -329,6 +343,7 @@ async function startStream() {
       buf = buf.slice(offset)
     }
   } catch (err) {
+    clearTimeout(noFrameTimer)
     if (err?.name === 'AbortError') return
     // fetch streaming non supporté sur ce navigateur (ex. Safari/multipart) — bascule sur <img>
     if (!useImgFallback.value) {
@@ -630,6 +645,10 @@ function showSnackbar(color, icon, message) {
 }
 
 .left-controls::-webkit-scrollbar { display: none; }
+
+.left-controls :deep(.v-btn) {
+  overflow: hidden;
+}
 
 .capture-overlay {
   position: absolute;
