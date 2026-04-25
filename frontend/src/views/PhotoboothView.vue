@@ -46,7 +46,7 @@
             />
             <img
               v-else
-              :src="streamUrl"
+              :src="streamImgUrl"
               class="camera-stream"
               style="object-fit: cover;"
               alt="Flux caméra"
@@ -85,7 +85,7 @@
               icon="mdi-phone-rotate-portrait"
               size="x-large"
               rounded="circle"
-              elevation="8"
+              elevation="0"
               color="red"
               variant="elevated"
               @click="toggleOrientation"
@@ -96,9 +96,9 @@
               icon="mdi-image-off-outline"
               size="x-large"
               rounded="circle"
-              :elevation="masksStore.activeMask === null ? 8 : 0"
-              :color="masksStore.activeMask === null ? 'red' : 'white'"
-              :variant="masksStore.activeMask === null ? 'elevated' : 'text'"
+              elevation="0"
+              :color="masksStore.activeMask === null ? 'red' : 'black'"
+              variant="elevated"
               @click="masksStore.deselectAll()"
             />
             <v-btn
@@ -107,9 +107,9 @@
               icon="mdi-image-outline"
               size="x-large"
               rounded="circle"
-              :elevation="masksStore.activeMask?.id === mask.id ? 8 : 0"
-              :color="masksStore.activeMask?.id === mask.id ? 'red' : 'white'"
-              :variant="masksStore.activeMask?.id === mask.id ? 'elevated' : 'text'"
+              elevation="0"
+              :color="masksStore.activeMask?.id === mask.id ? 'red' : 'black'"
+              variant="elevated"
               @click="masksStore.selectMask(mask.id)"
             />
           </div>
@@ -209,6 +209,7 @@ let pullStartY = 0
 
 const canvasRef = ref(null)
 const useImgFallback = ref(false)
+const streamBustKey = ref(0)
 let streamAbortController = null
 let currentBitmap = null
 let resizeObserver = null
@@ -223,6 +224,7 @@ const orientation = computed({
 })
 
 const streamUrl = computed(() => getStreamUrl(masksStore.orientation))
+const streamImgUrl = computed(() => `${streamUrl.value}&_t=${streamBustKey.value}`)
 
 const cropRatio = computed(() => {
   const w = settingsStore.photoWidthMm
@@ -254,8 +256,9 @@ function stopStream() {
   currentBitmap = null
 }
 
-async function startStream() {
+async function startStream(isRetry = false) {
   stopStream()
+  streamBustKey.value = Date.now()
   cameraError.value = false
 
   if (!streamApiSupported()) {
@@ -269,12 +272,17 @@ async function startStream() {
   let rendering = false
   let firstFrameReceived = false
 
-  // Si aucune frame n'arrive dans les 5s (ex. WKWebView/Safari PWA qui bloque multipart fetch),
-  // bascule sur <img> plutôt que de rester avec un canvas noir.
+  // Si aucune frame n'arrive dans les 5s (ex. WKWebView PWA qui suspend le réseau à la navigation),
+  // on retente une fois avant de basculer sur <img>. Le retry couvre le cas où le réseau met
+  // quelques secondes de plus à reprendre (typique en standalone PWA sur iPad).
   const noFrameTimer = setTimeout(() => {
     if (!firstFrameReceived && !controller.signal.aborted) {
       controller.abort()
-      useImgFallback.value = true
+      if (!isRetry) {
+        setTimeout(() => startStream(true), 2000)
+      } else {
+        useImgFallback.value = true
+      }
     }
   }, 5000)
 
@@ -358,6 +366,10 @@ watch(streamUrl, () => {
   if (!useImgFallback.value) startStream()
 })
 
+function handleVisibilityChange() {
+  if (!document.hidden && !useImgFallback.value) startStream()
+}
+
 onMounted(async () => {
   await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
   printerStore.startPolling()
@@ -373,12 +385,14 @@ onMounted(async () => {
     }
   })
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
   printerStore.stopPolling()
   stopStream()
   resizeObserver?.disconnect()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
 function sleep(ms) {
