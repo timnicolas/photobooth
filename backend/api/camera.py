@@ -174,6 +174,8 @@ class StreamingOutput(io.BufferedIOBase):
         self.condition = Condition()
 
     def write(self, buf):
+        if not buf:
+            return
         with self.condition:
             self.frame = buf
             self.condition.notify_all()
@@ -238,8 +240,16 @@ def _picamera_capture() -> np.ndarray:
 
 def _picamera_stream():
     _get_picamera()  # s'assure que la caméra et l'encodeur sont démarrés
-    while True:
-        with _stream_output.condition:
-            _stream_output.condition.wait()
-            frame = _stream_output.frame
-        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+    try:
+        while True:
+            with _stream_output.condition:
+                # timeout : permet au générateur de traiter GeneratorExit à la déconnexion
+                # client au lieu de rester bloqué indéfiniment (évite l'accumulation de zombies)
+                if not _stream_output.condition.wait(timeout=1.0):
+                    continue
+                frame = _stream_output.frame
+            if frame is None:  # garde anti-race au démarrage (avant le premier write)
+                continue
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+    finally:
+        pass  # point de cleanup explicite à GeneratorExit

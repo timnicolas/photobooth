@@ -29,6 +29,11 @@ def stream():
     return Response(
         mjpeg_frames(orientation),
         mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 

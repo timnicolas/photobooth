@@ -5,6 +5,7 @@ import { getPrinterStatus, getPrinterJobs, cancelPrinterJob, cancelAllPrinterJob
 export const usePrinterStore = defineStore('printer', () => {
   const status = ref(null)
   const jobs = ref([])
+  const reachable = ref(true)
   let _timeoutId = null
   let _polling = false
 
@@ -13,12 +14,27 @@ export const usePrinterStore = defineStore('printer', () => {
   const errors = computed(() => status.value?.errors ?? [])
   const errorMessage = computed(() => errors.value.join(' — ') || null)
 
+  // Connected = last fetch succeeded, printer present in CUPS, and not reported offline.
+  const isConnected = computed(
+    () =>
+      reachable.value &&
+      status.value?.available !== false &&
+      !errors.value.some((e) => e.toLowerCase().includes('déconnect'))
+  )
+
+  // Message shown in the error banner: explicit errors, or a disconnection fallback
+  // when the printer is simply unreachable (no error string available).
+  const bannerMessage = computed(() => errorMessage.value || (isConnected.value ? null : 'Imprimante déconnectée'))
+
   async function refresh() {
     try {
       const [s, j] = await Promise.all([getPrinterStatus(), getPrinterJobs()])
       status.value = s
       jobs.value = j.jobs ?? []
-    } catch {}
+      reachable.value = true
+    } catch {
+      reachable.value = false
+    }
   }
 
   async function _poll() {
@@ -58,5 +74,5 @@ export const usePrinterStore = defineStore('printer', () => {
     } catch {}
   }
 
-  return { status, jobs, isError, isPrinting, errors, errorMessage, refresh, startPolling, stopPolling, cancelJob, cancelAllJobs }
+  return { status, jobs, reachable, isError, isPrinting, errors, errorMessage, isConnected, bannerMessage, refresh, startPolling, stopPolling, cancelJob, cancelAllJobs }
 })

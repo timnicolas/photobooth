@@ -3,13 +3,28 @@
     <template #activator="{ props }">
       <v-btn
         v-bind="props"
-        :icon="printerStore.isError ? 'mdi-printer-alert' : 'mdi-printer'"
-        :color="printerStore.isError ? 'error' : undefined"
+        :icon="!printerStore.isConnected ? 'mdi-printer-off' : printerStore.isError ? 'mdi-printer-alert' : 'mdi-printer'"
+        :color="!printerStore.isConnected || printerStore.isError ? 'error' : 'success'"
         title="État imprimante"
       />
     </template>
 
     <v-card min-width="300" class="pa-1">
+      <!-- État de connexion -->
+      <div class="d-flex align-center px-3 pt-2 pb-1">
+        <v-icon
+          :color="printerStore.isConnected ? 'success' : 'error'"
+          size="12"
+          class="mr-2"
+        >
+          mdi-circle
+        </v-icon>
+        <span class="text-body-2 font-weight-medium">
+          {{ printerStore.isConnected ? 'Imprimante connectée' : 'Imprimante déconnectée' }}
+        </span>
+      </div>
+      <v-divider class="my-1" />
+
       <!-- Statut -->
       <v-card-text v-if="!printerStore.status" class="text-medium-emphasis text-center py-3">
         Chargement...
@@ -40,7 +55,7 @@
           {{ err }}
         </v-alert>
         <v-alert
-          v-if="!printerStore.isPrinting && printerStore.errors.length === 0"
+          v-if="printerStore.isConnected && !printerStore.isPrinting && printerStore.errors.length === 0"
           type="success"
           icon="mdi-printer-check"
           density="compact"

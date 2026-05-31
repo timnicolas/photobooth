@@ -1,15 +1,17 @@
 <template>
   <v-alert
-    v-if="printerStore.isError"
+    v-if="printerStore.isError || !printerStore.isConnected"
     type="error"
-    icon="mdi-printer-alert"
+    :icon="printerStore.isConnected ? 'mdi-printer-alert' : 'mdi-printer-off'"
     variant="elevated"
     prominent
     rounded="0"
     class="printer-error-banner"
   >
-    <div class="text-h6 font-weight-bold">Erreur imprimante</div>
-    <div class="text-body-1">{{ printerStore.errorMessage }}</div>
+    <div class="text-h6 font-weight-bold">
+      {{ printerStore.isConnected ? 'Erreur imprimante' : 'Imprimante déconnectée' }}
+    </div>
+    <div class="text-body-1">{{ printerStore.bannerMessage }}</div>
   </v-alert>
 </template>
 
@@ -29,7 +31,7 @@ function playAlert() {
 // Play the alert only when the error message changes (new/different error),
 // not on every polling cycle.
 watch(
-  () => printerStore.errorMessage,
+  () => printerStore.bannerMessage,
   (msg, prev) => {
     if (msg && msg !== prev) playAlert()
   }
