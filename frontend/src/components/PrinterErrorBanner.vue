@@ -1,7 +1,7 @@
 <template>
   <v-alert
     v-if="printerStore.isError || !printerStore.isConnected"
-    type="error"
+    color="red"
     :icon="printerStore.isConnected ? 'mdi-printer-alert' : 'mdi-printer-off'"
     variant="elevated"
     density="compact"
