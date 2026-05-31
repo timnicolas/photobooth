@@ -146,7 +146,18 @@ class PrinterManager:
                         reasons = [reasons]
                     message_raw = ipp.get("printer-state-message", "") or ""
                 except Exception:
-                    wifi_ip = None  # fallback CUPS
+                    # IPP direct read failed: the WiFi printer is unreachable (off or
+                    # off-network). Do NOT fall back to the CUPS cache here — it reports
+                    # a stale "idle" state and would hide the disconnection.
+                    return {
+                        "nom": nom_imprimante,
+                        "en_erreur": True,
+                        "message": "Imprimante déconnectée",
+                        "bloquee": False,
+                        "erreurs": ["Imprimante déconnectée"],
+                        "job_en_cours": False,
+                        "reasons": ["offline"],
+                    }
 
             if not wifi_ip:
                 printers = self.conn.getPrinters()

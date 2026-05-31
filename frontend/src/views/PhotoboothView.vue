@@ -222,8 +222,10 @@ let resizeObserver = null
 // programmées ne s'exécutent que si elles appartiennent toujours à la génération courante.
 let streamGeneration = 0
 // Backoff de reconnexion : nombre d'échecs consécutifs depuis la dernière frame reçue.
+// Au-delà de MAX_CANVAS_RETRIES, on bascule vite sur le <img> natif (chemin le plus fiable,
+// notamment en WKWebView/PWA iPad) plutôt que de s'acharner sur le canvas.
 let streamRetryCount = 0
-const MAX_CANVAS_RETRIES = 3
+const MAX_CANVAS_RETRIES = 1
 let fallbackHealthTimer = null
 
 function streamApiSupported() {
@@ -384,10 +386,14 @@ async function startStream(isRetry = false) {
   }
 }
 
-watch(streamUrl, () => startStream())
+// En mode <img>, le changement d'orientation met à jour le src via la réactivité de
+// streamImgUrl — inutile (et contre-productif) de relancer startStream qui couperait le flux.
+watch(streamUrl, () => {
+  if (!useImgFallback.value) startStream()
+})
 
 function handleVisibilityChange() {
-  if (!document.hidden) startStream()
+  if (!document.hidden && !useImgFallback.value) startStream()
 }
 
 onMounted(async () => {
@@ -406,10 +412,11 @@ onMounted(async () => {
   })
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  // Health-check : si on est resté coincé sur le fallback <img>, retente le canvas
-  // périodiquement (et rafraîchit l'URL <img> au passage via streamBustKey).
+  // Health-check : ne retente une reconnexion QUE si le fallback <img> est lui-même en
+  // erreur (cameraError). Si le <img> diffuse correctement, on n'y touche pas — sinon on
+  // couperait un flux qui marche. Couvre le cas réseau coupé puis rétabli.
   fallbackHealthTimer = setInterval(() => {
-    if (useImgFallback.value && !document.hidden) startStream()
+    if (useImgFallback.value && cameraError.value && !document.hidden) startStream()
   }, 20000)
 })
 
