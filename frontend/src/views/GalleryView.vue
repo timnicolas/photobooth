@@ -63,6 +63,8 @@
       </template>
     </v-app-bar>
 
+    <PrinterErrorBanner />
+
     <v-main>
       <v-container class="py-4">
 
@@ -234,6 +236,7 @@ import { useAuthStore } from '../stores/auth'
 import { usePrinterStore } from '../stores/printer'
 import { useSettingsStore } from '../stores/settings'
 import PrinterMenu from '../components/PrinterMenu.vue'
+import PrinterErrorBanner from '../components/PrinterErrorBanner.vue'
 import {
   getPhotos, deletePhoto, printPhoto, downloadPhoto, exportPhotos, photoFileUrl,
   downloadSelection, deleteSelection,

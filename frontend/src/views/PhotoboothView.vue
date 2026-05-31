@@ -14,6 +14,8 @@
       </template>
     </v-app-bar>
 
+    <PrinterErrorBanner />
+
     <v-main class="overflow-hidden">
       <v-container fluid class="pa-0 h-100 d-flex flex-column">
 
@@ -189,6 +191,8 @@ import { usePrinterStore } from '../stores/printer'
 import { getStreamUrl, postCapture } from '../api/camera'
 import { printPhoto, photoFileUrl } from '../api/photos'
 import PrinterMenu from '../components/PrinterMenu.vue'
+import PrinterErrorBanner from '../components/PrinterErrorBanner.vue'
+import { initAudio, playBeep, getAudioCtx } from '../composables/useAudio'
 
 const auth = useAuthStore()
 const masksStore = useMasksStore()
@@ -399,36 +403,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// AudioContext unique réutilisé — doit être créé pendant un geste utilisateur (avant tout await)
-let audioCtx = null
-
-function initAudio() {
-  try {
-    if (!audioCtx || audioCtx.state === 'closed') {
-      audioCtx = new AudioContext()
-    } else if (audioCtx.state === 'suspended') {
-      audioCtx.resume()
-    }
-  } catch {}
-}
-
-function playBeep(freq = 880, duration = 120, volume = 0.25) {
-  if (!audioCtx) return
-  try {
-    const osc = audioCtx.createOscillator()
-    const gain = audioCtx.createGain()
-    osc.connect(gain)
-    gain.connect(audioCtx.destination)
-    osc.type = 'sine'
-    osc.frequency.value = freq
-    gain.gain.setValueAtTime(volume, audioCtx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration / 1000)
-    osc.start()
-    osc.stop(audioCtx.currentTime + duration / 1000)
-  } catch {}
-}
-
 function playShutter() {
+  const audioCtx = getAudioCtx()
   if (!audioCtx) return
   try {
     const sr = audioCtx.sampleRate
