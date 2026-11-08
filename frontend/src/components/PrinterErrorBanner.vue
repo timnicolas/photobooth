@@ -15,7 +15,7 @@
 <script setup>
 import { watch, onMounted } from 'vue'
 import { usePrinterStore } from '../stores/printer'
-import { playBeep, unlockAudioOnce } from '../composables/useAudio'
+import { playBeep, bindAudioUnlock } from '../composables/useAudio'
 
 const printerStore = usePrinterStore()
 
@@ -35,7 +35,7 @@ watch(
 )
 
 onMounted(() => {
-  unlockAudioOnce()
+  bindAudioUnlock()
 })
 </script>
 
