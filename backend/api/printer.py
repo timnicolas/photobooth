@@ -2,6 +2,7 @@
 import logging
 import os
 import struct
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +25,20 @@ _ERROR_POLICY = "retry-job"
 _POLICY_RETRY_INTERVAL = 60  # s entre deux tentatives si l'application de la politique échoue
 _policy_applied: set[str] = set()
 _policy_last_attempt: dict[str, float] = {}
+
+# Lecture IPP directe : la Selphy a un petit serveur IPP qui rate parfois une requête
+# (veille WiFi, occupée pendant une impression, plusieurs clients qui sondent en même
+# temps). Pour ne pas afficher "déconnectée" sur un simple raté :
+#  - les requêtes sont sérialisées et le résultat partagé pendant _IPP_CACHE_TTL ;
+#  - un échec est réessayé une fois ;
+#  - on ne déclare l'imprimante déconnectée qu'après _IPP_GRACE s sans réponse.
+_IPP_TIMEOUT = 4
+_IPP_RETRY_DELAY = 0.5
+_IPP_CACHE_TTL = 2.0
+_IPP_GRACE = 25.0
+_ipp_lock = threading.Lock()
+_ipp_last_ok: dict[str, tuple[float, dict]] = {}
+_ipp_last_fail: dict[str, float] = {}
 
 
 class PrinterManager:
@@ -135,8 +150,43 @@ class PrinterManager:
             headers={'Content-Type': 'application/ipp'},
             method='POST',
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=_IPP_TIMEOUT) as resp:
             return self._parse_ipp_attrs(resp.read())
+
+    def _ipp_attrs_tolerant(self, ip: str) -> dict | None:
+        """Lecture IPP directe tolérante aux ratés ponctuels.
+
+        Retourne les attributs (éventuellement ceux de la dernière lecture réussie si
+        l'imprimante ne répond pas depuis moins de _IPP_GRACE s), ou None si elle est
+        injoignable depuis plus longtemps.
+        """
+        with _ipp_lock:
+            now = time.monotonic()
+            cached = _ipp_last_ok.get(ip)
+            if cached and now - cached[0] < _IPP_CACHE_TTL:
+                return cached[1]
+            # Une lecture vient d'échouer (requêtes en file derrière le verrou) : ne pas
+            # relancer une lecture complète, réutiliser le verdict.
+            if now - _ipp_last_fail.get(ip, float("-inf")) < _IPP_CACHE_TTL:
+                return cached[1] if cached and now - cached[0] < _IPP_GRACE else None
+
+            for attempt in range(2):
+                try:
+                    attrs = self._ipp_direct_attrs(ip)
+                    _ipp_last_ok[ip] = (time.monotonic(), attrs)
+                    _ipp_last_fail.pop(ip, None)
+                    return attrs
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    if attempt == 0:
+                        time.sleep(_IPP_RETRY_DELAY)
+
+            _ipp_last_fail[ip] = time.monotonic()
+            if cached and time.monotonic() - cached[0] < _IPP_GRACE:
+                logger.info("IPP read of %s failed (%s), using last known state", ip, last_err)
+                return cached[1]
+            logger.warning("Printer %s unreachable via IPP: %s", ip, last_err)
+            return None
 
     # ── File CUPS ─────────────────────────────────────────────────────────────
 
@@ -208,14 +258,14 @@ class PrinterManager:
             state, reasons, message_raw = 3, ["none"], ""
 
             if wifi_ip:
-                try:
-                    ipp = self._ipp_direct_attrs(wifi_ip)
+                ipp = self._ipp_attrs_tolerant(wifi_ip)
+                if ipp is not None:
                     state = ipp.get("printer-state", 3)
                     reasons = ipp.get("printer-state-reasons", ["none"])
                     if isinstance(reasons, str):
                         reasons = [reasons]
                     message_raw = ipp.get("printer-state-message", "") or ""
-                except Exception:
+                else:
                     # IPP direct read failed: the WiFi printer is unreachable (off or
                     # off-network). Do NOT fall back to the CUPS cache here — it reports
                     # a stale "idle" state and would hide the disconnection.

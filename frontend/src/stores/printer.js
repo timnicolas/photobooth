@@ -7,6 +7,10 @@ export const usePrinterStore = defineStore('printer', () => {
   const jobs = ref([])
   const reachable = ref(true)
   let _timeoutId = null
+  // Number of consecutive failed fetches before showing the printer as disconnected,
+  // so a single network blip (iPad WiFi) doesn't flash "Imprimante déconnectée".
+  const MAX_FAILURES = 3
+  let _failures = 0
   let _polling = false
 
   const isError = computed(() => (status.value?.errors ?? []).length > 0)
@@ -32,8 +36,10 @@ export const usePrinterStore = defineStore('printer', () => {
       status.value = s
       jobs.value = j.jobs ?? []
       reachable.value = true
+      _failures = 0
     } catch {
-      reachable.value = false
+      _failures += 1
+      if (_failures >= MAX_FAILURES) reachable.value = false
     }
   }
 
