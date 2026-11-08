@@ -2,11 +2,15 @@
  * Home-screen web app (iPad) layout.
  *
  * The page is drawn under the status bar (viewport-fit=cover + black-translucent in
- * index.html): app bars get the status bar height as extra top padding so their
- * background fills that area and the icons stay below it.
+ * index.html): app bars get extra top padding so their background fills that area and
+ * the icons stay below the zone iPadOS blurs.
  */
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
+  /* iPadOS (26+) blurs the web app content under the status bar and about half its
+     height below it: nothing important is drawn in this zone. 0 outside home-screen apps. */
+  --top-blur-zone: calc(var(--safe-top) * 1.5);
+  --printer-toast-top: calc(var(--top-blur-zone) + 72px);
 }
 
 html,
@@ -15,12 +19,17 @@ body {
 }
 
 .v-application .v-app-bar {
-  padding-top: var(--safe-top);
+  padding-top: var(--top-blur-zone);
 }
 
-/* Vuetify reserves only the app bar height: add the status bar height */
+/* Vuetify reserves only the app bar height: add the blur zone */
 .v-application .v-main {
-  padding-top: calc(var(--v-layout-top) + var(--safe-top));
+  padding-top: calc(var(--v-layout-top) + var(--top-blur-zone));
+}
+
+/* Photobooth page: no app bar, the camera starts right below the blur zone on black */
+.v-application .v-main.kiosk-main {
+  background: #000;
 }
 
 /*
@@ -34,6 +43,10 @@ html.kiosk-layout body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+html.kiosk-layout {
+  --printer-toast-top: calc(var(--top-blur-zone) + 12px);
 }
 
 html.kiosk-layout body {

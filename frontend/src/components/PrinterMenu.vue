@@ -1,12 +1,9 @@
 <template>
-  <v-menu :close-on-content-click="false">
+  <v-menu :close-on-content-click="false" :location="rail ? 'end' : undefined">
     <template #activator="{ props }">
-      <v-btn
-        v-bind="props"
-        :icon="!printerStore.isConnected ? 'mdi-printer-off' : printerStore.isError ? 'mdi-printer-alert' : 'mdi-printer'"
-        :color="!printerStore.isConnected || printerStore.isError ? 'error' : 'success'"
-        title="État imprimante"
-      />
+      <v-btn v-bind="{ ...props, ...btnAttrs }" title="État imprimante">
+        <v-icon :color="statusColor">{{ statusIcon }}</v-icon>
+      </v-btn>
     </template>
 
     <v-card min-width="300" class="pa-1">
@@ -123,10 +120,25 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { usePrinterStore } from '../stores/printer'
 
+const props = defineProps({
+  // Round button for the photobooth side rail (default: plain icon button for an app bar)
+  rail: { type: Boolean, default: false },
+})
+
 const printerStore = usePrinterStore()
+
+const statusIcon = computed(() =>
+  !printerStore.isConnected ? 'mdi-printer-off' : printerStore.isError ? 'mdi-printer-alert' : 'mdi-printer',
+)
+const statusColor = computed(() => (!printerStore.isConnected || printerStore.isError ? 'error' : 'success'))
+const btnAttrs = computed(() =>
+  props.rail
+    ? { icon: true, size: 'x-large', rounded: 'circle', elevation: 0, color: 'black', variant: 'elevated' }
+    : { icon: true },
+)
 const cancelling = ref(null)
 const cancellingAll = ref(false)
 

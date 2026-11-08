@@ -40,10 +40,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* Small persistent toast floating over the camera image, just below the app bar. */
+/* Small persistent toast floating over the camera image, just below the app bar (top of the screen on the photobooth page). */
 .printer-error-toast {
   position: fixed;
-  top: calc(72px + var(--safe-top, 0px));
+  top: var(--printer-toast-top, 72px);
   left: 50%;
   transform: translateX(-50%);
   width: auto;

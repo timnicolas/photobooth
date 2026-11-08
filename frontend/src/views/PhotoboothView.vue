@@ -1,22 +1,8 @@
 <template>
   <v-app>
-    <!-- Barre de navigation -->
-    <v-app-bar color="surface" elevation="1">
-      <v-app-bar-title>
-        <v-icon color="primary" class="mr-1">mdi-camera-iris</v-icon>
-        Photobooth
-      </v-app-bar-title>
-      <template #append>
-        <PrinterMenu />
-        <v-btn icon="mdi-refresh" :loading="refreshing" @click="handleRefresh" title="Actualiser" />
-        <v-btn icon="mdi-image-multiple" :to="'/gallery'" title="Galerie" />
-        <v-btn v-if="auth.isAdmin" icon="mdi-cog" :to="'/admin'" title="Administration" />
-      </template>
-    </v-app-bar>
-
     <PrinterErrorBanner />
 
-    <v-main class="overflow-hidden">
+    <v-main class="overflow-hidden kiosk-main">
       <v-container fluid class="pa-0 h-100 d-flex flex-column">
 
         <!-- Flux caméra -->
@@ -82,39 +68,66 @@
             </div>
           </div>
 
-          <!-- Panneau de contrôle gauche -->
-          <div class="left-controls">
-            <v-btn
-              icon="mdi-phone-rotate-portrait"
-              size="x-large"
-              rounded="circle"
-              elevation="0"
-              color="red"
-              variant="elevated"
-              @click="toggleOrientation"
-            />
-            <div style="height: 3rem;"></div>
-            <v-btn
-              v-if="settingsStore.allowNoMask"
-              icon="mdi-image-off-outline"
-              size="x-large"
-              rounded="circle"
-              elevation="0"
-              :color="masksStore.activeMask === null ? 'red' : 'black'"
-              variant="elevated"
-              @click="masksStore.deselectAll()"
-            />
-            <v-btn
-              v-for="mask in masksStore.filteredMasks"
-              :key="mask.id"
-              icon="mdi-image-outline"
-              size="x-large"
-              rounded="circle"
-              elevation="0"
-              :color="masksStore.activeMask?.id === mask.id ? 'red' : 'black'"
-              variant="elevated"
-              @click="masksStore.selectMask(mask.id)"
-            />
+          <!-- Colonne de gauche : navigation en haut, orientation + masques au centre -->
+          <div class="left-rail">
+            <div class="rail-group">
+              <PrinterMenu rail />
+              <v-btn
+                icon="mdi-image-multiple"
+                size="x-large"
+                rounded="circle"
+                elevation="0"
+                color="black"
+                variant="elevated"
+                :to="'/gallery'"
+                title="Galerie"
+              />
+              <v-btn
+                v-if="auth.isAdmin"
+                icon="mdi-cog"
+                size="x-large"
+                rounded="circle"
+                elevation="0"
+                color="black"
+                variant="elevated"
+                :to="'/admin'"
+                title="Administration"
+              />
+            </div>
+
+            <div class="rail-group rail-filters">
+              <v-btn
+                icon="mdi-phone-rotate-portrait"
+                size="x-large"
+                rounded="circle"
+                elevation="0"
+                color="red"
+                variant="elevated"
+                @click="toggleOrientation"
+              />
+              <div class="rail-separator" />
+              <v-btn
+                v-if="settingsStore.allowNoMask"
+                icon="mdi-image-off-outline"
+                size="x-large"
+                rounded="circle"
+                elevation="0"
+                :color="masksStore.activeMask === null ? 'red' : 'black'"
+                variant="elevated"
+                @click="masksStore.deselectAll()"
+              />
+              <v-btn
+                v-for="mask in masksStore.filteredMasks"
+                :key="mask.id"
+                icon="mdi-image-outline"
+                size="x-large"
+                rounded="circle"
+                elevation="0"
+                :color="masksStore.activeMask?.id === mask.id ? 'red' : 'black'"
+                variant="elevated"
+                @click="masksStore.selectMask(mask.id)"
+              />
+            </div>
           </div>
 
           <!-- Bouton capture -->
@@ -437,6 +450,12 @@ watch(streamUrl, () => {
   if (!useImgFallback.value) startStream()
 })
 
+// Tint used by iPadOS behind the status bar: black on this full-screen page
+const DEFAULT_THEME_COLOR = '#1e1e1e'
+function setThemeColor(color) {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color)
+}
+
 function handleCanvasResize(entries) {
   for (const entry of entries) {
     const canvas = entry.target
@@ -477,6 +496,7 @@ onMounted(() => {
   isMounted = true
   // The photobooth page must always fit the screen exactly (see styles/layout.css)
   document.documentElement.classList.add('kiosk-layout')
+  setThemeColor('#000000')
   resizeObserver = new ResizeObserver(handleCanvasResize)
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -493,6 +513,7 @@ onMounted(() => {
 onUnmounted(() => {
   isMounted = false
   document.documentElement.classList.remove('kiosk-layout')
+  setThemeColor(DEFAULT_THEME_COLOR)
   streamGeneration++  // invalide toute reconnexion encore programmée
   printerStore.stopPolling()
   stopStream()
@@ -723,26 +744,44 @@ function showSnackbar(color, icon, message) {
   inset: 0;
 }
 
-/* Contrôles gauche et bouton capture */
-.left-controls {
+/* Colonne de gauche : groupe navigation collé en haut, filtres centrés dans l'espace
+   restant (et scrollables s'il y a beaucoup de masques, sans jamais chevaucher la nav). */
+.left-rail {
   position: absolute;
+  top: 0;
+  bottom: 0;
   left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
   z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: center;
-  max-height: 90%;
+  gap: 24px;
+  padding: 8px 0;
+  pointer-events: none; /* seuls les boutons captent les touches (pull-to-refresh, etc.) */
+}
+
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
+  pointer-events: auto;
+}
+
+.rail-filters {
+  margin: auto 0;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
 }
 
-.left-controls::-webkit-scrollbar { display: none; }
+.rail-filters::-webkit-scrollbar { display: none; }
 
-.left-controls :deep(.v-btn) {
+.rail-separator { height: 2rem; flex-shrink: 0; }
+
+.left-rail :deep(.v-btn) {
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .capture-overlay {
