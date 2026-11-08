@@ -1,0 +1,49 @@
+/*
+ * Home-screen web app (iPad) layout.
+ *
+ * The page is drawn under the status bar (viewport-fit=cover + black-translucent in
+ * index.html): app bars get the status bar height as extra top padding so their
+ * background fills that area and the icons stay below it.
+ */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+html,
+body {
+  background: #1e1e1e; /* matches the app bar (surface) behind the status bar */
+}
+
+.v-application .v-app-bar {
+  padding-top: var(--safe-top);
+}
+
+/* Vuetify reserves only the app bar height: add the status bar height */
+.v-application .v-main {
+  padding-top: calc(var(--v-layout-top) + var(--safe-top));
+}
+
+/*
+ * Kiosk mode (photobooth view): the page must always fit the screen exactly, with no
+ * scroll. Vuetify sizes the app with 100dvh and forces html { overflow-y: scroll }; in an
+ * iPad home-screen app 100dvh can exceed the visible area (status bar), which made the
+ * page scrollable. Here every level is sized on the real viewport instead.
+ */
+html.kiosk-layout,
+html.kiosk-layout body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html.kiosk-layout body {
+  position: fixed;
+  inset: 0;
+}
+
+html.kiosk-layout #app,
+html.kiosk-layout .v-application,
+html.kiosk-layout .v-application__wrap {
+  height: 100%;
+  min-height: 0;
+}

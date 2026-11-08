@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import vuetify from './plugins/vuetify'
 import router from './router'
 import App from './App.vue'
+import './styles/layout.css'
 import { bindAudioUnlock } from './composables/useAudio'
 
 const app = createApp(App)

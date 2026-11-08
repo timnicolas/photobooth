@@ -475,6 +475,8 @@ async function loadConfig() {
 
 onMounted(() => {
   isMounted = true
+  // The photobooth page must always fit the screen exactly (see styles/layout.css)
+  document.documentElement.classList.add('kiosk-layout')
   resizeObserver = new ResizeObserver(handleCanvasResize)
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -490,6 +492,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   isMounted = false
+  document.documentElement.classList.remove('kiosk-layout')
   streamGeneration++  // invalide toute reconnexion encore programmée
   printerStore.stopPolling()
   stopStream()

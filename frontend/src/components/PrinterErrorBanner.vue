@@ -43,7 +43,7 @@ onMounted(() => {
 /* Small persistent toast floating over the camera image, just below the app bar. */
 .printer-error-toast {
   position: fixed;
-  top: 72px;
+  top: calc(72px + var(--safe-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   width: auto;
