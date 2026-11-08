@@ -11,7 +11,10 @@ from peewee import (
 
 from api.config import Config
 
-db = SqliteDatabase(Config.DATABASE_PATH)
+# timeout : attente (s) quand la base est verrouillée par une écriture concurrente,
+# au lieu d'échouer immédiatement en "database is locked".
+# Les connexions sont ouvertes/fermées à chaque requête (voir app.py).
+db = SqliteDatabase(Config.DATABASE_PATH, timeout=15)
 
 
 class BaseModel(Model):

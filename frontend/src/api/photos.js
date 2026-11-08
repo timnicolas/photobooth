@@ -11,7 +11,7 @@ export const printPhoto = (id, raw = false) =>
   client.post(`/photos/${id}/print${raw ? '?raw=true' : ''}`).then((r) => r.data)
 
 export const downloadPhoto = (id, raw = false) =>
-  client.get(`/photos/${id}/file${raw ? '?raw=true' : ''}`, { responseType: 'blob' }).then((r) => {
+  client.get(`/photos/${id}/file${raw ? '?raw=true' : ''}`, { responseType: 'blob', timeout: 60000 }).then((r) => {
     const url = URL.createObjectURL(r.data)
     const a = document.createElement('a')
     a.href = url
@@ -20,18 +20,21 @@ export const downloadPhoto = (id, raw = false) =>
     URL.revokeObjectURL(url)
   })
 
-export const exportPhotos = (raw = false) =>
-  client.get(`/photos/export${raw ? '?raw=true' : ''}`, { responseType: 'blob' }).then((r) => {
-    const url = URL.createObjectURL(r.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = raw ? 'photos_brutes.zip' : 'photos.zip'
-    a.click()
-    URL.revokeObjectURL(url)
-  })
+// Native download link (token passed as ?jwt=): the browser streams the ZIP straight to
+// disk. Fetching it through axios would keep the whole archive (often >1 GB) in memory.
+export const exportPhotos = (raw = false) => {
+  const params = new URLSearchParams({ jwt: localStorage.getItem('token') ?? '' })
+  if (raw) params.set('raw', 'true')
+  const a = document.createElement('a')
+  a.href = `/api/photos/export?${params}`
+  a.download = raw ? 'photos_brutes.zip' : 'photos.zip'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
 
 export const downloadSelection = (ids, raw = false) =>
-  client.post('/photos/download-selection', { ids, raw }, { responseType: 'blob' }).then((r) => {
+  client.post('/photos/download-selection', { ids, raw }, { responseType: 'blob', timeout: 0 }).then((r) => {
     const url = URL.createObjectURL(r.data)
     const a = document.createElement('a')
     a.href = url

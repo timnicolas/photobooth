@@ -66,4 +66,17 @@ else
     ok "oh-my-zsh installé"
 fi
 
+# --- Droits CUPS ---
+# Le backend réactive lui-même la file d'impression quand CUPS l'arrête après une erreur
+# (Selphy éteinte, WiFi perdu) et règle printer-error-policy=retry-job : il faut les
+# droits d'administration CUPS (groupe lpadmin).
+
+if id -nG "$USER" | grep -qw lpadmin; then
+    skip "groupe lpadmin"
+else
+    log "Ajout de $USER au groupe lpadmin..."
+    sudo usermod -aG lpadmin "$USER"
+    ok "$USER ajouté à lpadmin (effectif au prochain démarrage du service)"
+fi
+
 ok "=== Configuration Pi terminée ==="

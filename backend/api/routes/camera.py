@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -5,13 +6,28 @@ import cv2
 from flask import Blueprint, Response, jsonify, request
 from flask_jwt_extended import jwt_required
 
-from api.camera import apply_mask, capture_frame, mjpeg_frames
+from api.camera import apply_mask, capture_frame, ensure_camera_ready, mjpeg_frames
 from api.config import Config
 from api.models import Mask, Photo
 from api.printer import PrinterManager
 
 
 camera_bp = Blueprint("camera", __name__)
+logger = logging.getLogger(__name__)
+
+
+def _write_jpeg(path: str, image, params) -> None:
+    """Écrit un JPEG ; lève OSError si OpenCV n'a pas pu écrire (disque plein, droits...)."""
+    if not cv2.imwrite(path, image, params):
+        raise OSError(f"Écriture impossible : {path}")
+
+
+def _remove_quietly(*paths: str) -> None:
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 # Le flux vidéo est accessible sans JWT car un <img src="..."> dans le navigateur
@@ -25,6 +41,12 @@ def stream():
         mask_id     (int, optionnel)         — id du masque à appliquer dans le flux
     """
     orientation = request.args.get("orientation", "portrait")
+
+    try:
+        ensure_camera_ready()
+    except RuntimeError as e:
+        # 503 avant le début du streaming : le client sait qu'il doit réessayer
+        return jsonify({"error": str(e)}), 503
 
     return Response(
         mjpeg_frames(orientation),
@@ -52,38 +74,48 @@ def capture():
     # 1. Capture de la frame (avec crop selon orientation)
     try:
         frame = capture_frame(orientation)
-    except RuntimeError as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception as e:  # noqa: BLE001 — toute erreur caméra/libcamera doit renvoyer du JSON
+        logger.exception("Capture failed")
+        message = str(e) if isinstance(e, RuntimeError) else f"Erreur caméra : {e}"
+        return jsonify({"error": message}), 503
 
-    # 2. Sauvegarde sur disque
+    # 2. Chemins de sauvegarde (millisecondes : deux captures dans la même seconde ne s'écrasent pas)
     os.makedirs(Config.PHOTOS_DIR, exist_ok=True)
-    filename = f"photo_{int(time.time())}.jpg"
+    filename = f"photo_{int(time.time() * 1000)}.jpg"
     filepath = os.path.join(Config.PHOTOS_DIR, filename)
     raw_filename = filename.replace(".jpg", "_raw.jpg")
     raw_filepath = os.path.join(Config.PHOTOS_DIR, raw_filename)
 
-    # 3. Application du masque actif (si existant)
+    # 3. Application du masque actif (si existant) puis écriture sur disque
     active_mask = Mask.get_or_none(Mask.is_active == True)  # noqa: E712
     jpeg_params = [cv2.IMWRITE_JPEG_QUALITY, Config.PHOTO_JPEG_QUALITY]
+    composited = frame
     if active_mask:
-        mask_path = os.path.join(Config.MASKS_DIR, active_mask.filename)
-        # Version brute (sans masque)
-        cv2.imwrite(raw_filepath, frame, jpeg_params)
-        # Version finale avec masque
-        composited = apply_mask(frame, mask_path)
-        cv2.imwrite(filepath, composited, jpeg_params)
-    else:
-        # Sans masque : raw et filtered sont identiques
-        cv2.imwrite(filepath, frame, jpeg_params)
-        cv2.imwrite(raw_filepath, frame, jpeg_params)
+        try:
+            composited = apply_mask(frame, os.path.join(Config.MASKS_DIR, active_mask.filename))
+        except Exception:  # noqa: BLE001 — mieux vaut une photo sans masque que pas de photo
+            logger.exception("Applying mask %s failed, saving photo without mask", active_mask.id)
+            active_mask = None
+            composited = frame
+    try:
+        _write_jpeg(raw_filepath, frame, jpeg_params)  # version brute (sans masque)
+        _write_jpeg(filepath, composited, jpeg_params)  # version finale
+    except (OSError, cv2.error):
+        logger.exception("Saving photo %s failed", filename)
+        _remove_quietly(filepath, raw_filepath)
+        return jsonify({"error": "Impossible d'enregistrer la photo (carte SD pleine ?)"}), 507
 
     # 4. Enregistrement en base
-    photo = Photo.create(
-        filename=filename,
-        mask=active_mask,
-        orientation=orientation,
-        printed=False,
-    )
+    try:
+        photo = Photo.create(
+            filename=filename,
+            mask=active_mask,
+            orientation=orientation,
+            printed=False,
+        )
+    except Exception:
+        _remove_quietly(filepath, raw_filepath)
+        raise
 
     # 5. Impression si demandée
     print_error = None
@@ -93,7 +125,8 @@ def capture():
             pm.imprimer_image(Config.PRINTER_NAME, filepath, sans_bordure=True)
             photo.printed = True
             photo.save()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — la photo est prise, l'impression peut être relancée
+            logger.exception("Printing photo %s failed", photo.id)
             print_error = str(e)
 
     response = {

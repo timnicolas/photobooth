@@ -40,6 +40,20 @@ class Config:
     PICAMERA_STREAM_BITRATE = int(os.environ.get("PICAMERA_STREAM_BITRATE", 5_000_000))
     # Qualité image — contrôles ISP picamera2
     PICAMERA_CAPTURE_DELAY = float(os.environ.get("PICAMERA_CAPTURE_DELAY", 0.5))
+    # Résilience caméra
+    # Délai max d'attente d'une frame pleine résolution lors d'une capture (s)
+    PICAMERA_CAPTURE_TIMEOUT = float(os.environ.get("PICAMERA_CAPTURE_TIMEOUT", 10))
+    # Sans nouvelle frame de l'encodeur pendant ce délai, la caméra est considérée bloquée
+    # et redémarrée ; les flux clients en cours sont terminés (ils se reconnectent) (s)
+    PICAMERA_STALL_TIMEOUT = float(os.environ.get("PICAMERA_STALL_TIMEOUT", 5))
+    # Délai minimal entre deux tentatives d'ouverture après un échec (s)
+    PICAMERA_INIT_RETRY_DELAY = float(os.environ.get("PICAMERA_INIT_RETRY_DELAY", 3))
+    # Délai max pour fermer la caméra avant de la considérer bloquée (s)
+    PICAMERA_CLOSE_TIMEOUT = float(os.environ.get("PICAMERA_CLOSE_TIMEOUT", 10))
+    # Nombre de redémarrages consécutifs sans aucune frame avant d'abandonner
+    PICAMERA_MAX_CONSECUTIVE_RESETS = int(os.environ.get("PICAMERA_MAX_CONSECUTIVE_RESETS", 3))
+    # Si libcamera est irrécupérable, termine le process pour que systemd le relance
+    PICAMERA_EXIT_ON_HANG = os.environ.get("PICAMERA_EXIT_ON_HANG", "true").lower() in ("1", "true", "yes")
     PICAMERA_NOISE_REDUCTION = int(os.environ.get("PICAMERA_NOISE_REDUCTION", 2))
     PICAMERA_SHARPNESS = float(os.environ.get("PICAMERA_SHARPNESS", 1.5))
     PICAMERA_CONTRAST = float(os.environ.get("PICAMERA_CONTRAST", 1.15))

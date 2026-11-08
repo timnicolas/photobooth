@@ -1,4 +1,5 @@
 """PrinterManager — gestion de l'imprimante Canon Selphy CP1500 via CUPS."""
+import logging
 import os
 import struct
 import time
@@ -6,6 +7,23 @@ import urllib.error
 import urllib.request
 
 import cups
+
+logger = logging.getLogger(__name__)
+
+# Jamais de prompt mot de passe interactif : sous systemd il n'y a pas de terminal et
+# une opération admin refusée doit échouer proprement (l'utilisateur du service doit
+# être dans le groupe lpadmin pour réactiver la file).
+cups.setPasswordCB(lambda *_args: "")
+
+# CUPS-queue states (IPP printer-state)
+_CUPS_STOPPED = 5
+# "retry-job" : si la Selphy est éteinte / hors WiFi, CUPS garde le job et le relance
+# au lieu d'arrêter la file (politique par défaut "stop-printer", qui bloque silencieusement
+# toutes les impressions suivantes même une fois l'imprimante revenue).
+_ERROR_POLICY = "retry-job"
+_POLICY_RETRY_INTERVAL = 60  # s entre deux tentatives si l'application de la politique échoue
+_policy_applied: set[str] = set()
+_policy_last_attempt: dict[str, float] = {}
 
 
 class PrinterManager:
@@ -120,6 +138,58 @@ class PrinterManager:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return self._parse_ipp_attrs(resp.read())
 
+    # ── File CUPS ─────────────────────────────────────────────────────────────
+
+    def _appliquer_politique_erreur(self, nom_imprimante):
+        """Configure une fois la politique d'erreur de la file (best-effort, réessaie toutes les 60s)."""
+        if nom_imprimante in _policy_applied:
+            return
+        now = time.monotonic()
+        last = _policy_last_attempt.get(nom_imprimante)
+        if last is not None and now - last < _POLICY_RETRY_INTERVAL:
+            return
+        _policy_last_attempt[nom_imprimante] = now
+        try:
+            self.conn.setPrinterErrorPolicy(nom_imprimante, _ERROR_POLICY)
+            _policy_applied.add(nom_imprimante)
+            logger.info("CUPS error policy of %s set to %s", nom_imprimante, _ERROR_POLICY)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Cannot set CUPS error policy of %s: %s", nom_imprimante, e)
+
+    def assurer_file_active(self, nom_imprimante):
+        """Garantit que la file CUPS est activée et accepte les jobs.
+
+        Après une erreur matérielle (imprimante éteinte, WiFi perdu), CUPS peut avoir
+        arrêté la file : les jobs sont alors acceptés mais jamais imprimés. On la réactive.
+        Retourne l'état CUPS de la file après correction (3 idle, 4 processing, 5 stopped),
+        ou None si CUPS n'a pas pu être interrogé.
+        """
+        self._appliquer_politique_erreur(nom_imprimante)
+        try:
+            attrs = self.conn.getPrinterAttributes(
+                nom_imprimante,
+                requested_attributes=["printer-state", "printer-is-accepting-jobs"],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Cannot read CUPS queue %s: %s", nom_imprimante, e)
+            return None
+
+        state = attrs.get("printer-state")
+        if state == _CUPS_STOPPED:
+            try:
+                self.conn.enablePrinter(nom_imprimante)
+                logger.warning("CUPS queue %s was stopped, re-enabled it", nom_imprimante)
+                state = 3
+            except Exception as e:  # noqa: BLE001
+                logger.error("Cannot re-enable CUPS queue %s: %s", nom_imprimante, e)
+        if attrs.get("printer-is-accepting-jobs") is False:
+            try:
+                self.conn.acceptJobs(nom_imprimante)
+                logger.warning("CUPS queue %s was rejecting jobs, re-enabled it", nom_imprimante)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Cannot make CUPS queue %s accept jobs: %s", nom_imprimante, e)
+        return state
+
     def lister_imprimantes(self):
         """Retourne une liste des noms d'imprimantes disponibles."""
         try:
@@ -158,6 +228,10 @@ class PrinterManager:
                         "job_en_cours": False,
                         "reasons": ["offline"],
                     }
+
+            # L'imprimante est joignable (ou on est en USB) : on s'assure que la file
+            # CUPS n'est pas restée arrêtée suite à une erreur précédente.
+            queue_state = self.assurer_file_active(nom_imprimante)
 
             if not wifi_ip:
                 printers = self.conn.getPrinters()
@@ -222,7 +296,7 @@ class PrinterManager:
             except Exception:
                 pass
 
-            bloquee = state == 5
+            bloquee = state == _CUPS_STOPPED or queue_state == _CUPS_STOPPED
             en_erreur = bool(erreurs)
 
             if erreurs:
@@ -343,8 +417,12 @@ class PrinterManager:
             "ColorModel": "Gray" if noir_blanc else "RGB",
         }
 
+        # Une file arrêtée accepterait le job sans jamais l'imprimer
+        if self.assurer_file_active(nom_imprimante) == _CUPS_STOPPED:
+            raise RuntimeError("File d'impression bloquée — vérifiez l'imprimante")
+
         try:
             job_id = self.conn.printFile(nom_imprimante, chemin_image, "Job Python", options_cups)
             return job_id
         except cups.IPPError as e:
-            raise RuntimeError(f"Erreur d'envoi CUPS : {e}")
+            raise RuntimeError(f"Erreur d'envoi CUPS : {e}") from e

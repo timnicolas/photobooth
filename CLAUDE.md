@@ -56,6 +56,8 @@ WiFi hotspot: SSID `PhotoBooth`, password `photobooth`, IP `10.4.4.12`.
 - **`models.py`** — Peewee ORM over SQLite (`data/photobooth.db`): `User`, `Photo`, `Mask`, `AppSettings`
 - **`camera.py`** — Camera abstraction with singleton for picamera2 (prevents "device busy" errors); handles orientation-aware cropping and alpha-composite mask overlay (Porter-Duff)
 - **`printer.py`** — pycups wrapper for Canon SELPHY; handles print options, status reporting, and error states. Printer is connected via WiFi (IPP Everywhere, `ipp://10.4.4.32:631/ipp/print`) for reliable hardware error reporting; USB (`Canon_SELPHY_CP1500`) kept as fallback. IP `10.4.4.32` is fixed via DHCP reservation (`/etc/NetworkManager/dnsmasq-shared.d/selphy-reservation.conf`, MAC `6c:f2:d8:63:3f:73`).
+  The backend self-heals the CUPS queue: it sets `printer-error-policy=retry-job` and re-enables a stopped queue on every status poll / print, so the service user must be in the `lpadmin` group.
+- **Resilience** — a picamera watchdog thread restarts the camera when the MJPEG encoder stops producing frames (`PICAMERA_STALL_TIMEOUT`); if libcamera is wedged it exits the process so systemd (`Restart=always`) restarts it. The frontend has its own stream watchdog and reconnects automatically.
 - **`decorators.py`** — `@jwt_required` and `@admin_required` route guards
 
 Routes in `backend/api/routes/`: `auth`, `camera`, `photos`, `masks`, `printer`, `settings`.

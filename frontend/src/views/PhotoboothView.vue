@@ -218,15 +218,32 @@ const streamBustKey = ref(0)
 let streamAbortController = null
 let currentBitmap = null
 let resizeObserver = null
+let isMounted = false
 // Sérialisation : chaque (re)démarrage incrémente la génération ; les reconnexions
 // programmées ne s'exécutent que si elles appartiennent toujours à la génération courante.
 let streamGeneration = 0
-// Backoff de reconnexion : nombre d'échecs consécutifs depuis la dernière frame reçue.
-// Au-delà de MAX_CANVAS_RETRIES, on bascule vite sur le <img> natif (chemin le plus fiable,
-// notamment en WKWebView/PWA iPad) plutôt que de s'acharner sur le canvas.
+// Backoff de reconnexion : nombre d'échecs consécutifs depuis la dernière frame affichée.
 let streamRetryCount = 0
+// Tant que le canvas n'a jamais affiché une frame, on bascule vite sur le <img> natif
+// (chemin le plus fiable en WKWebView/PWA iPad). Une fois qu'il a fonctionné, une coupure
+// est forcément transitoire (backend redémarré, WiFi) : on reste en canvas et on réessaie.
 const MAX_CANVAS_RETRIES = 1
-let fallbackHealthTimer = null
+let canvasStreamWorks = false
+// Watchdog canvas : aucune frame affichée depuis ce délai → flux considéré mort, reconnexion.
+// Couvre le serveur qui garde la connexion ouverte sans rien envoyer et la connexion TCP
+// à moitié fermée (WiFi coupé), cas où reader.read() ne rend jamais la main.
+const FIRST_FRAME_TIMEOUT_MS = 8000
+const STALL_TIMEOUT_MS = 6000
+const MAX_RECONNECT_DELAY_MS = 10000
+let streamWatchdog = null
+let reconnectTimer = null
+// Le <img> MJPEG ne déclenche en général aucun événement quand le flux s'arrête : en mode
+// fallback on rouvre donc la connexion périodiquement, et vite si une erreur a été vue.
+const IMG_REFRESH_MS = 60000
+const IMG_ERROR_RETRY_MS = 5000
+let imgHealthTimer = null
+let lastImgRefresh = 0
+let configRetryTimer = null
 
 function streamApiSupported() {
   return typeof createImageBitmap === 'function' && typeof ReadableStream !== 'undefined'
@@ -266,22 +283,38 @@ function drawFrame(bitmap) {
 function stopStream() {
   streamAbortController?.abort()
   streamAbortController = null
+  clearInterval(streamWatchdog)
+  streamWatchdog = null
+  clearTimeout(reconnectTimer)
+  reconnectTimer = null
   currentBitmap?.close()
   currentBitmap = null
 }
 
-// Programme une reconnexion canvas avec backoff exponentiel (2s, 4s, 8s… max 30s).
-// Au-delà de MAX_CANVAS_RETRIES échecs consécutifs, bascule sur le fallback <img> ;
-// le health-check (setInterval) retentera périodiquement le canvas.
+function refreshImgStream() {
+  lastImgRefresh = Date.now()
+  streamBustKey.value = lastImgRefresh
+}
+
+function switchToImgFallback() {
+  stopStream()
+  useImgFallback.value = true
+  refreshImgStream()
+}
+
+// Programme une reconnexion canvas avec backoff exponentiel (2s, 4s, 8s… max 10s).
 function scheduleReconnect(generation) {
-  if (generation !== streamGeneration) return  // une génération plus récente a pris le relais
-  if (streamRetryCount >= MAX_CANVAS_RETRIES) {
-    useImgFallback.value = true
+  if (generation !== streamGeneration || !isMounted) return  // une génération plus récente a pris le relais
+  if (!canvasStreamWorks && streamRetryCount >= MAX_CANVAS_RETRIES) {
+    switchToImgFallback()
     return
   }
-  const delay = Math.min(2000 * 2 ** streamRetryCount, 30000)
+  // Coupure qui dure : on l'affiche (le premier échec peut n'être qu'un simple hoquet)
+  if (streamRetryCount >= 1) cameraError.value = true
+  const delay = Math.min(2000 * 2 ** streamRetryCount, MAX_RECONNECT_DELAY_MS)
   streamRetryCount++
-  setTimeout(() => {
+  clearTimeout(reconnectTimer)
+  reconnectTimer = setTimeout(() => {
     if (generation === streamGeneration) startStream(true)
   }, delay)
 }
@@ -289,37 +322,44 @@ function scheduleReconnect(generation) {
 async function startStream(isRetry = false) {
   stopStream()
   const generation = ++streamGeneration
-  useImgFallback.value = false
-  streamBustKey.value = Date.now()
-  cameraError.value = false
-  if (!isRetry) streamRetryCount = 0
+  if (!isRetry) {
+    streamRetryCount = 0
+    cameraError.value = false
+  }
 
   if (!streamApiSupported()) {
-    useImgFallback.value = true
+    switchToImgFallback()
     return
   }
+  useImgFallback.value = false
 
   const controller = new AbortController()
   streamAbortController = controller
   let buf = new Uint8Array(0)
   let rendering = false
-  let firstFrameReceived = false
+  const startedAt = Date.now()
+  let lastFrameAt = 0
 
-  // Si aucune frame n'arrive dans les 5s (ex. WKWebView PWA qui suspend le réseau à la navigation),
-  // on abandonne cette tentative et on programme une reconnexion avec backoff.
-  const noFrameTimer = setTimeout(() => {
-    if (firstFrameReceived || generation !== streamGeneration) return
+  // Abandonne cette tentative (une seule fois) et programme la suivante
+  const failStream = () => {
+    if (controller.signal.aborted) return
+    clearInterval(watchdog)
     controller.abort()
     scheduleReconnect(generation)
-  }, 5000)
+  }
+
+  const watchdog = setInterval(() => {
+    // Onglet caché : timers throttlés, le retour au premier plan relance de toute façon le flux
+    if (document.hidden) return
+    const now = Date.now()
+    const stalled = lastFrameAt
+      ? now - lastFrameAt > STALL_TIMEOUT_MS
+      : now - startedAt > FIRST_FRAME_TIMEOUT_MS
+    if (stalled) failStream()
+  }, 1000)
+  streamWatchdog = watchdog
 
   const processFrame = (jpeg) => {
-    if (!firstFrameReceived) {
-      firstFrameReceived = true
-      clearTimeout(noFrameTimer)
-      streamRetryCount = 0       // flux rétabli → reset du backoff
-      cameraError.value = false  // nettoie l'overlay dès qu'une vraie frame arrive
-    }
     if (rendering) return
     rendering = true
     let promise
@@ -335,25 +375,31 @@ async function startStream(isRetry = false) {
         drawFrame(bitmap)
         currentBitmap?.close()
         currentBitmap = bitmap
+        // Seule une frame effectivement affichée prouve que le flux est vivant
+        if (!lastFrameAt) {
+          streamRetryCount = 0       // flux rétabli → reset du backoff
+          canvasStreamWorks = true
+          cameraError.value = false  // nettoie l'overlay dès qu'une vraie frame arrive
+        }
+        lastFrameAt = Date.now()
       })
       .catch(() => {})
       .finally(() => { rendering = false })
   }
 
   try {
-    const res = await fetch(streamUrl.value, { signal: controller.signal })
+    const res = await fetch(streamUrl.value, { signal: controller.signal, cache: 'no-store' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)  // ex. 503 caméra indisponible
     if (!res.body) {
-      clearTimeout(noFrameTimer)
-      useImgFallback.value = true
+      if (generation === streamGeneration) switchToImgFallback()
       return
     }
     const reader = res.body.getReader()
     while (true) {
       const { done, value } = await reader.read()
       if (done) {
-        // Le serveur a fermé le flux (redémarrage, etc.) — reconnexion avec backoff
-        clearTimeout(noFrameTimer)
-        if (!controller.signal.aborted) scheduleReconnect(generation)
+        // Le serveur a fermé le flux (redémarrage, caméra bloquée...) — reconnexion avec backoff
+        failStream()
         break
       }
       const next = new Uint8Array(buf.length + value.length)
@@ -378,11 +424,10 @@ async function startStream(isRetry = false) {
       }
       buf = buf.slice(offset)
     }
-  } catch (err) {
-    clearTimeout(noFrameTimer)
-    if (err?.name === 'AbortError') return
-    // Erreur réseau / streaming non supporté — reconnexion avec backoff, puis fallback <img>
-    scheduleReconnect(generation)
+  } catch {
+    // AbortError (arrêt volontaire ou watchdog) : failStream ne fait rien si déjà aborté.
+    // Sinon erreur réseau / HTTP : reconnexion avec backoff, puis fallback <img>.
+    failStream()
   }
 }
 
@@ -392,39 +437,66 @@ watch(streamUrl, () => {
   if (!useImgFallback.value) startStream()
 })
 
-function handleVisibilityChange() {
-  if (!document.hidden && !useImgFallback.value) startStream()
+function handleCanvasResize(entries) {
+  for (const entry of entries) {
+    const canvas = entry.target
+    const { width: w, height: h } = entry.contentRect
+    if (!w || !h) continue
+    canvas.width = Math.round(w)
+    canvas.height = Math.round(h)
+    if (currentBitmap && canvas === canvasRef.value) drawFrame(currentBitmap)
+  }
 }
 
-onMounted(async () => {
-  await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
-  printerStore.startPolling()
-  startStream()
-  resizeObserver = new ResizeObserver(entries => {
-    for (const entry of entries) {
-      const { inlineSize: w, blockSize: h } = entry.contentBoxSize[0]
-      const canvas = canvasRef.value
-      if (!canvas || !w || !h) return
-      canvas.width = Math.round(w)
-      canvas.height = Math.round(h)
-      if (currentBitmap) drawFrame(currentBitmap)
-    }
-  })
+// Le canvas est recréé à chaque retour depuis le fallback <img> (v-if) : on observe
+// toujours l'élément courant, sinon le nouveau canvas resterait à 300×150.
+watch(canvasRef, (el, prev) => {
+  if (!resizeObserver) return
+  if (prev) resizeObserver.unobserve(prev)
+  if (el) resizeObserver.observe(el)
+}, { flush: 'post' })
+
+function handleVisibilityChange() {
+  if (document.hidden) return
+  if (useImgFallback.value) refreshImgStream()
+  else startStream()
+}
+
+// Masques + réglages. Si le backend n'est pas joignable (démarrage du Pi, redémarrage du
+// service), on réessaie en tâche de fond jusqu'au succès sans bloquer le reste de la page.
+async function loadConfig() {
+  clearTimeout(configRetryTimer)
+  configRetryTimer = null
+  const results = await Promise.allSettled([masksStore.fetchMasks(), settingsStore.fetchSettings()])
+  const ok = results.every(r => r.status === 'fulfilled')
+  if (!ok && isMounted) configRetryTimer = setTimeout(loadConfig, 5000)
+  return ok
+}
+
+onMounted(() => {
+  isMounted = true
+  resizeObserver = new ResizeObserver(handleCanvasResize)
   if (canvasRef.value) resizeObserver.observe(canvasRef.value)
   document.addEventListener('visibilitychange', handleVisibilityChange)
-  // Health-check : ne retente une reconnexion QUE si le fallback <img> est lui-même en
-  // erreur (cameraError). Si le <img> diffuse correctement, on n'y touche pas — sinon on
-  // couperait un flux qui marche. Couvre le cas réseau coupé puis rétabli.
-  fallbackHealthTimer = setInterval(() => {
-    if (useImgFallback.value && cameraError.value && !document.hidden) startStream()
-  }, 20000)
+  imgHealthTimer = setInterval(() => {
+    if (!useImgFallback.value || document.hidden) return
+    const since = Date.now() - lastImgRefresh
+    if ((cameraError.value && since >= IMG_ERROR_RETRY_MS) || since >= IMG_REFRESH_MS) refreshImgStream()
+  }, IMG_ERROR_RETRY_MS)
+  printerStore.startPolling()
+  startStream()
+  loadConfig()
 })
 
 onUnmounted(() => {
+  isMounted = false
+  streamGeneration++  // invalide toute reconnexion encore programmée
   printerStore.stopPolling()
   stopStream()
-  clearInterval(fallbackHealthTimer)
+  clearInterval(imgHealthTimer)
+  clearTimeout(configRetryTimer)
   resizeObserver?.disconnect()
+  resizeObserver = null
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -519,9 +591,10 @@ async function handleRefresh() {
   refreshing.value = true
   cameraError.value = false
   try {
-    await Promise.all([masksStore.fetchMasks(), settingsStore.fetchSettings()])
-    startStream()
+    // Le flux redémarre même si l'API est momentanément injoignable
+    await loadConfig()
   } finally {
+    startStream()
     refreshing.value = false
     pullDistance.value = 0
   }

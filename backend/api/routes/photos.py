@@ -1,9 +1,10 @@
 import io
+import logging
 import math
 import os
 import zipfile
 
-from flask import Blueprint, jsonify, request, send_file, send_from_directory
+from flask import Blueprint, Response, jsonify, request, send_from_directory
 from flask_jwt_extended import jwt_required
 
 from api.config import Config
@@ -12,12 +13,89 @@ from api.models import Photo
 from api.printer import PrinterManager
 
 photos_bp = Blueprint("photos", __name__)
+logger = logging.getLogger(__name__)
 
 _PHOTOS_ABS = os.path.abspath(Config.PHOTOS_DIR)
 
 
 def _raw_filename(filename: str) -> str:
     return filename.replace(".jpg", "_raw.jpg")
+
+
+def _zip_entries(photos, want_raw: bool) -> list[tuple[str, str]]:
+    """Retourne la liste (chemin source, nom dans l'archive) des fichiers existants."""
+    entries = []
+    for p in photos:
+        filepath = os.path.join(Config.PHOTOS_DIR, p.filename)
+        if want_raw:
+            raw_fname = _raw_filename(p.filename)
+            raw_path = os.path.join(Config.PHOTOS_DIR, raw_fname)
+            # Si la version brute existe, l'utiliser ; sinon fallback sur la version filtrée
+            src_path = raw_path if os.path.exists(raw_path) else filepath
+            arcname = raw_fname
+        else:
+            src_path, arcname = filepath, p.filename
+        if os.path.exists(src_path):
+            entries.append((src_path, arcname))
+    return entries
+
+
+class _ChunkSink(io.RawIOBase):
+    """Flux en écriture seule, non seekable : zipfile y écrit, le générateur vide les octets."""
+
+    def __init__(self):
+        self._chunks: list[bytes] = []
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        self._chunks.append(bytes(b))
+        return len(b)
+
+    def drain(self) -> bytes:
+        data = b"".join(self._chunks)
+        self._chunks.clear()
+        return data
+
+
+_ZIP_READ_CHUNK = 1024 * 1024
+
+
+def _stream_zip(entries: list[tuple[str, str]]):
+    """Génère un ZIP à la volée, sans le construire en mémoire ni sur disque.
+
+    Deflate niveau 1 : les JPEG ne se compressent quasiment pas, le niveau minimal coûte
+    peu de CPU au Pi. On garde deflate (plutôt que stored) car c'est le format streaming
+    (data descriptors) le mieux supporté par les outils de décompression.
+    """
+    sink = _ChunkSink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
+        for src_path, arcname in entries:
+            try:
+                zinfo = zipfile.ZipInfo.from_file(src_path, arcname)  # conserve la date de la photo
+                zinfo.compress_type = zipfile.ZIP_DEFLATED
+                zinfo.compress_level = 1
+                with open(src_path, "rb") as src, zf.open(zinfo, "w") as dst:
+                    while chunk := src.read(_ZIP_READ_CHUNK):
+                        dst.write(chunk)
+                        if data := sink.drain():
+                            yield data
+            except FileNotFoundError:
+                # Photo supprimée entre le listing et la lecture : on l'ignore
+                logger.warning("File %s vanished during zip export", src_path)
+            if data := sink.drain():
+                yield data
+    if data := sink.drain():
+        yield data
+
+
+def _zip_response(entries: list[tuple[str, str]], download_name: str) -> Response:
+    return Response(
+        _stream_zip(entries),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
 
 
 def _photo_dict(p: Photo) -> dict:
@@ -149,25 +227,8 @@ def download_selection():
     ids = data.get("ids", [])
     want_raw = data.get("raw", False)
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for photo_id in ids:
-            p = Photo.get_or_none(Photo.id == photo_id)
-            if not p:
-                continue
-            if want_raw:
-                raw_fname = _raw_filename(p.filename)
-                raw_path = os.path.join(Config.PHOTOS_DIR, raw_fname)
-                src_path = raw_path if os.path.exists(raw_path) else os.path.join(Config.PHOTOS_DIR, p.filename)
-                if os.path.exists(src_path):
-                    zf.write(src_path, raw_fname)
-            else:
-                filepath = os.path.join(Config.PHOTOS_DIR, p.filename)
-                if os.path.exists(filepath):
-                    zf.write(filepath, p.filename)
-
-    buf.seek(0)
-    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="selection.zip")
+    photos = [p for p in (Photo.get_or_none(Photo.id == pid) for pid in ids) if p]
+    return _zip_response(_zip_entries(photos, want_raw), "selection.zip")
 
 
 @photos_bp.route("/photos/delete-selection", methods=["POST"])
@@ -197,7 +258,10 @@ def delete_selection():
 
 
 @photos_bp.route("/photos/export", methods=["GET"])
-@admin_required
+# Token aussi accepté en query string (?jwt=...) : l'export est déclenché par un lien de
+# téléchargement natif (pas de header possible) pour que le navigateur écrive le ZIP sur
+# disque au fil de l'eau au lieu de le garder entièrement en mémoire.
+@admin_required(locations=["headers", "query_string"])
 def export_photos():
     """Génère un ZIP de toutes les photos (admin uniquement).
 
@@ -207,26 +271,7 @@ def export_photos():
     want_raw = request.args.get("raw", "false").lower() == "true"
     photos = Photo.select().order_by(Photo.captured_at.asc())
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in photos:
-            if want_raw:
-                raw_fname = _raw_filename(p.filename)
-                raw_path = os.path.join(Config.PHOTOS_DIR, raw_fname)
-                # Si la version brute existe, l'utiliser ; sinon fallback sur la version filtrée
-                src_path = raw_path if os.path.exists(raw_path) else os.path.join(Config.PHOTOS_DIR, p.filename)
-                if os.path.exists(src_path):
-                    zf.write(src_path, raw_fname)
-            else:
-                filepath = os.path.join(Config.PHOTOS_DIR, p.filename)
-                if os.path.exists(filepath):
-                    zf.write(filepath, p.filename)
-
-    buf.seek(0)
     suffix = "_brutes" if want_raw else "_filtrees"
-    return send_file(
-        buf,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=f"photos{suffix}.zip",
-    )
+    # Liste construite avant le streaming : la connexion DB est fermée en fin de requête,
+    # avant que le générateur ne soit consommé.
+    return _zip_response(_zip_entries(list(photos), want_raw), f"photos{suffix}.zip")
